@@ -54,3 +54,7 @@ e2e/ansible/collections/
 # systemd E2E agent binary + collection staging (built by run.sh)
 e2e/systemd/bin/
 e2e/systemd/collections/
+
+# Python
+__pycache__/
+*.pyc
