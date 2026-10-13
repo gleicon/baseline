@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gleicon/fiia/internal/agent/audit"
+	"github.com/gleicon/baseline/internal/agent/audit"
 )
 
 // makeManifest writes a baseline sentinel and records a manifest tracking it.
@@ -18,7 +18,7 @@ func makeManifest(t *testing.T) (manifest, sentinel string) {
 	if err := os.WriteFile(sentinel, []byte("baseline\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := audit.GenerateManifest(manifest, []string{sentinel}, nil, nil, false); err != nil {
+	if _, _, err := audit.GenerateManifest(manifest, []string{sentinel}, nil, nil, nil, false); err != nil {
 		t.Fatal(err)
 	}
 	return manifest, sentinel
@@ -74,7 +74,7 @@ func TestRunCheckConfigModeResolution(t *testing.T) {
 
 	// -manifest wins over the config path.
 	other := filepath.Join(filepath.Dir(manifest), "other.json")
-	if _, _, err := audit.GenerateManifest(other, nil, nil, nil, false); err != nil {
+	if _, _, err := audit.GenerateManifest(other, nil, nil, nil, nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if got := runCheck(cfg, other, "text", "", "", false); got != 0 {

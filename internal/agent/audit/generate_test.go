@@ -31,7 +31,7 @@ func TestGenerateManifestRoundTrip(t *testing.T) {
 	}
 	dest := filepath.Join(dir, "sub", "manifest.json")
 
-	warnings, changed, err := GenerateManifest(dest, []string{fpath, filepath.Join(dir, "missing.txt")}, nil, nil, false)
+	warnings, changed, err := GenerateManifest(dest, []string{fpath, filepath.Join(dir, "missing.txt")}, nil, nil, nil, false)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestGenerateManifestRoundTrip(t *testing.T) {
 		t.Errorf("files: got %+v", m.Files)
 	}
 
-	_, changed, err = GenerateManifest(dest, []string{fpath, filepath.Join(dir, "missing.txt")}, nil, nil, false)
+	_, changed, err = GenerateManifest(dest, []string{fpath, filepath.Join(dir, "missing.txt")}, nil, nil, nil, false)
 	if err != nil {
 		t.Fatalf("regenerate: %v", err)
 	}

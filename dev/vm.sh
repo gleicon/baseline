@@ -29,10 +29,10 @@ if [[ -z "${DEV_VM_BACKEND:-}" ]]; then
   fi
   # parse Makefile := assignment syntax
   DEV_VM_BACKEND="$(grep '^DEV_VM_BACKEND' "$BACKEND_FILE" | sed 's/DEV_VM_BACKEND[[:space:]]*:=[[:space:]]*//')"
-  DEV_VM_NAME="$(grep '^DEV_VM_NAME' "$BACKEND_FILE" | sed 's/DEV_VM_NAME[[:space:]]*:=[[:space:]]*//' || echo 'fiia-dev')"
+  DEV_VM_NAME="$(grep '^DEV_VM_NAME' "$BACKEND_FILE" | sed 's/DEV_VM_NAME[[:space:]]*:=[[:space:]]*//' || echo 'baseline-dev')"
 fi
 
-VM_NAME="${DEV_VM_NAME:-fiia-dev}"
+VM_NAME="${DEV_VM_NAME:-baseline-dev}"
 CMD="${1:-help}"
 shift || true
 

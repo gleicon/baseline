@@ -193,17 +193,113 @@ func RecordEnd(manifestPath, indexPath string, roots []string) (added, removed i
 			removed++
 		}
 	}
+	if err := writeRecorded(manifestPath, m, byPath); err != nil {
+		return 0, 0, err
+	}
+	return added, removed, nil
+}
+
+// RecordSnapshot builds a baseline from the current tree: every file under the
+// roots becomes a tracked manifest entry (no diff). Use it to bootstrap an
+// already-provisioned node, or as a full-state capture. Returns the number of
+// tracked files after the merge.
+func RecordSnapshot(manifestPath string, roots []string) (int, error) {
+	idx, err := BuildFileIndex(roots)
+	if err != nil {
+		return 0, err
+	}
+	m := Manifest{SchemaVersion: 1}
+	if existing, lerr := loadManifest(manifestPath); lerr == nil {
+		m = existing
+	}
+	m.GeneratedAt = time.Now().Unix()
+
+	byPath := make(map[string]ManifestFile, len(m.Files)+len(idx))
+	for _, f := range m.Files {
+		byPath[f.Path] = f
+	}
+	for path, attrs := range idx {
+		byPath[path] = attrs.toManifestFile(path)
+	}
+	if err := writeRecorded(manifestPath, m, byPath); err != nil {
+		return 0, err
+	}
+	return len(byPath), nil
+}
+
+// ObservedFile is one file captured on the controller by the callback plugin.
+// The controller only enumerates the path; the agent hashes the file on the
+// node, so the reported checksum is informational, not trusted.
+type ObservedFile struct {
+	Sha256 string `json:"sha256"`
+	Mode   string `json:"mode"`
+}
+
+// RecordObserved merges a controller-captured file path set (see the
+// baseline.fleet.baseline_capture callback) into the manifest. Each path is re-owned
+// and hashed on the node, so checksums reported by the controller are not
+// trusted. Returns the number of tracked files.
+func RecordObserved(manifestPath, observedPath string) (int, error) {
+	data, err := os.ReadFile(observedPath)
+	if err != nil {
+		return 0, fmt.Errorf("read observed %q: %w", observedPath, err)
+	}
+	var observed map[string]ObservedFile
+	if err := json.Unmarshal(data, &observed); err != nil {
+		return 0, fmt.Errorf("parse observed %q: %w", observedPath, err)
+	}
+
+	m := Manifest{SchemaVersion: 1}
+	if existing, lerr := loadManifest(manifestPath); lerr == nil {
+		m = existing
+	}
+	m.GeneratedAt = time.Now().Unix()
+
+	byPath := make(map[string]ManifestFile, len(m.Files)+len(observed))
+	for _, f := range m.Files {
+		byPath[f.Path] = f
+	}
+	for path := range observed {
+		nf, herr := hashPath(path)
+		if herr != nil {
+			continue // missing or unreadable on the node; do not promise it
+		}
+		byPath[path] = nf
+	}
+	if err := writeRecorded(manifestPath, m, byPath); err != nil {
+		return 0, err
+	}
+	return len(byPath), nil
+}
+
+// hashPath records a file's current attributes from the node itself.
+func hashPath(path string) (ManifestFile, error) {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return ManifestFile{}, fmt.Errorf("stat %q: %w", path, err)
+	}
+	sum, err := sha256File(path)
+	if err != nil {
+		return ManifestFile{}, err
+	}
+	return ManifestFile{
+		Path:   path,
+		SHA256: sum,
+		Mode:   fmt.Sprintf("%o", info.Mode().Perm()),
+		Size:   info.Size(),
+		MTime:  info.ModTime().Unix(),
+	}, nil
+}
+
+// writeRecorded writes a manifest after a record operation, refreshing package
+// and service snapshots.
+func writeRecorded(manifestPath string, m Manifest, byPath map[string]ManifestFile) error {
 	m.Files = make([]ManifestFile, 0, len(byPath))
 	for _, f := range byPath {
 		m.Files = append(m.Files, f)
 	}
 	sort.Slice(m.Files, func(i, j int) bool { return m.Files[i].Path < m.Files[j].Path })
-
 	m.PackageSnapshot = ListInstalledPackages()
 	m.ServiceSnapshot = ListActiveServices()
-
-	if err := writeManifest(manifestPath, m); err != nil {
-		return 0, 0, err
-	}
-	return added, removed, nil
+	return writeManifest(manifestPath, m)
 }

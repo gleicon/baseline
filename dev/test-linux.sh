@@ -21,7 +21,7 @@ if [[ -z "${DEV_VM_BACKEND:-}" ]]; then
     exit 1
   fi
   DEV_VM_BACKEND="$(grep '^DEV_VM_BACKEND' "$BACKEND_FILE" | sed 's/DEV_VM_BACKEND[[:space:]]*:=[[:space:]]*//')"
-  DEV_VM_NAME="$(grep '^DEV_VM_NAME' "$BACKEND_FILE" | sed 's/DEV_VM_NAME[[:space:]]*:=[[:space:]]*//' || echo 'fiia-dev')"
+  DEV_VM_NAME="$(grep '^DEV_VM_NAME' "$BACKEND_FILE" | sed 's/DEV_VM_NAME[[:space:]]*:=[[:space:]]*//' || echo 'baseline-dev')"
 fi
 
 if [[ "$DEV_VM_BACKEND" == "local" ]]; then
@@ -32,7 +32,7 @@ fi
 
 # ── resolve VM shell command ────────────────────────────────────────────────────
 case "$DEV_VM_BACKEND" in
-  lima)   VM_SHELL="limactl shell ${DEV_VM_NAME:-fiia-dev} --" ;;
+  lima)   VM_SHELL="limactl shell ${DEV_VM_NAME:-baseline-dev} --" ;;
   colima) VM_SHELL="colima ssh --" ;;
   *)      echo "ERROR: backend '$DEV_VM_BACKEND' not supported for test-linux.sh" >&2; exit 1 ;;
 esac
@@ -57,7 +57,7 @@ for arg in "$@"; do
 done
 [[ ${#PACKAGES[@]} -eq 0 ]] && PACKAGES=("./...")
 
-TMPDIR_VM="/tmp/fiia-test-$$"
+TMPDIR_VM="/tmp/baseline-test-$$"
 
 # ── colima: write SSH config once for scp use ──────────────────────────────────
 COLIMA_SSH_CFG=""
@@ -98,11 +98,11 @@ for pkg in "${PACKAGES[@]}"; do
     pkg_src_dir="$(go list -f '{{.Dir}}' "$p" 2>/dev/null)"
     case "$DEV_VM_BACKEND" in
       lima)
-        limactl copy "$local_bin" "${DEV_VM_NAME:-fiia-dev}:${TMPDIR_VM}/${bin_name}"
+        limactl copy "$local_bin" "${DEV_VM_NAME:-baseline-dev}:${TMPDIR_VM}/${bin_name}"
         if [[ -d "${pkg_src_dir}/testdata" ]]; then
           $VM_SHELL mkdir -p "${TMPDIR_VM}/testdata"
           for f in "${pkg_src_dir}"/testdata/*; do
-            limactl copy "$f" "${DEV_VM_NAME:-fiia-dev}:${TMPDIR_VM}/testdata/$(basename "$f")"
+            limactl copy "$f" "${DEV_VM_NAME:-baseline-dev}:${TMPDIR_VM}/testdata/$(basename "$f")"
           done
         fi
         ;;

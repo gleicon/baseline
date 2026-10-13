@@ -1,0 +1,14 @@
+namespace: baseline
+name: fleet
+version: 0.1.0
+readme: README.md
+description: Baseline fleet monitoring — agent install role and manifest drift module
+license:
+  - MIT
+tags:
+  - monitoring
+  - fleet
+  - drift
+repository: https://github.com/gleicon/baseline
+documentation: https://github.com/gleicon/baseline
+homepage: https://github.com/gleicon/baseline

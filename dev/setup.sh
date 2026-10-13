@@ -5,10 +5,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_FILE="$SCRIPT_DIR/.backend"
-VM_NAME="${DEV_VM_NAME:-fiia-dev}"
+VM_NAME="${DEV_VM_NAME:-baseline-dev}"
 OS="$(uname -s)"
 
-echo "=== fiia dev environment setup ==="
+echo "=== baseline dev environment setup ==="
 echo ""
 
 # ── Linux: no VM needed ────────────────────────────────────────────────────────

@@ -1,0 +1,12 @@
+/var/log/baseline/*.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 baseline root
+    postrotate
+        systemctl kill --signal=HUP baseline-agent 2>/dev/null || true
+    endscript
+}

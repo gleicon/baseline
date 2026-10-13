@@ -14,14 +14,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gleicon/fiia/internal/agent/audit"
-	agentcfg "github.com/gleicon/fiia/internal/agent/config"
-	agentotel "github.com/gleicon/fiia/internal/agent/otel"
-	"github.com/gleicon/fiia/internal/agent/sdnotify"
+	"github.com/gleicon/baseline/internal/agent/audit"
+	agentcfg "github.com/gleicon/baseline/internal/agent/config"
+	agentotel "github.com/gleicon/baseline/internal/agent/otel"
+	"github.com/gleicon/baseline/internal/agent/sdnotify"
 )
 
 const (
-	default_config_path   = "/etc/fiia/agent.toml"
+	default_config_path   = "/etc/baseline/agent.toml"
 	watchdog_interval_sec = 25
 	otel_shutdown_timeout = 5 * time.Second
 )
@@ -49,12 +49,15 @@ func main() {
 	files_flag := flag.String("files", "", "write-manifest: comma-separated absolute file paths to track")
 	packages_flag := flag.String("packages", "", "write-manifest: comma-separated packages (name or name=version)")
 	services_flag := flag.String("services", "", "write-manifest: comma-separated service names to track")
+	settings_flag := flag.String("settings", "", "write-manifest: comma-separated runtime keys to track (sysctl:<name>); the live value is recorded and checked")
 	snapshot_flag := flag.Bool("snapshot", false, "write-manifest: also record full installed-package and active-service lists")
 	scan_flag := flag.String("scan-playbook", "", "comma-separated playbook paths to scan for managed files (feeds -write-manifest, or prints the list alone)")
 	otlp_flag := flag.String("otlp-endpoint", "", "OTLP/HTTP endpoint (default: OTEL_EXPORTER_OTLP_ENDPOINT env, else stdout)")
 	remediate_flag := flag.Bool("remediate", false, "enforce the manifest (remove unauthorized packages/services, fix declared service states). WARNING: this covers ONLY the packages & services recorded in the manifest snapshot — it does NOT restore users, cron, firewall, sysctl, or any other state that Ansible/IaC manages. OFF by default; re-running the provisioning playbook is the only complete fix. Files are never auto-restored.")
-	record_begin := flag.Bool("record-begin", false, "record: index the file tree under -dirs into -data before a provisioning run")
-	record_end := flag.Bool("record-end", false, "record: diff -data against a fresh index and merge the changed files into -manifest (the ansible inventory)")
+	record_begin := flag.Bool("record-begin", false, "record: index the file tree under -dirs into -data before a change window")
+	record_end := flag.Bool("record-end", false, "record: diff -data against a fresh index and merge the changed files into -manifest (the node inventory)")
+	record_snapshot := flag.Bool("record-snapshot", false, "record: track every file under -dirs as a baseline (no diff); bootstrap an existing node")
+	record_observed := flag.Bool("record-observed", false, "record: merge a controller-captured file set (-data, see the baseline_capture callback) into -manifest")
 	data_flag := flag.String("data", "", "record: index path (record-begin writes it, record-end reads it)")
 	dirs_flag := flag.String("dirs", "", "record: comma-separated root dirs to index")
 	flag.Parse()
@@ -67,7 +70,7 @@ func main() {
 		os.Exit(runScan(*scan_flag))
 	}
 	if *write_manifest {
-		os.Exit(runWriteManifest(*manifest_flag, *files_flag, *packages_flag, *services_flag, *snapshot_flag, *scan_flag))
+		os.Exit(runWriteManifest(*manifest_flag, *files_flag, *packages_flag, *services_flag, *settings_flag, *snapshot_flag, *scan_flag))
 	}
 	if *record_begin && *record_end {
 		fmt.Fprintln(os.Stderr, "agent: -record-begin and -record-end are mutually exclusive")
@@ -78,6 +81,12 @@ func main() {
 	}
 	if *record_end {
 		os.Exit(runRecordEnd(*manifest_flag, *data_flag, *dirs_flag))
+	}
+	if *record_snapshot {
+		os.Exit(runRecordSnapshot(*manifest_flag, *dirs_flag))
+	}
+	if *record_observed {
+		os.Exit(runRecordObserved(*manifest_flag, *data_flag))
 	}
 	if *check_mode {
 		os.Exit(runCheck(*config_path, *manifest_flag, *format_flag, *node_flag, *otlp_flag, *remediate_flag))
@@ -160,8 +169,8 @@ func runDaemon(config_path, node_flag, otlp_flag string) int {
 	return 0
 }
 
-// runHeartbeatLoop emits fiia.alive on the heartbeat interval and pings the
-// systemd watchdog. Backends alert on a missing fiia.alive series.
+// runHeartbeatLoop emits baseline.alive on the heartbeat interval and pings the
+// systemd watchdog. Backends alert on a missing baseline.alive series.
 func runHeartbeatLoop(ctx context.Context, cfg *agentcfg.AgentConfig, otel *agentotel.Handle) {
 	heartbeat_timer := time.NewTimer(0)
 	defer heartbeat_timer.Stop()
@@ -227,7 +236,7 @@ func runAuditLoop(ctx context.Context, cfg *agentcfg.AgentConfig, otel *agentote
 
 // runErrorLoop emits CHECK_ERROR verdicts on the audit interval while the
 // manifest cannot be read (e.g. permission denied). Unlike a silent disable,
-// this keeps the node visible to alerting: fiia.drift.status=2 with a
+// this keeps the node visible to alerting: baseline.drift.status=2 with a
 // remediation hint.
 func runErrorLoop(ctx context.Context, cfg *agentcfg.AgentConfig, otel *agentotel.Handle, probeErr error) {
 	hint := manifestPermissionHint(probeErr)
@@ -252,7 +261,7 @@ func runErrorLoop(ctx context.Context, cfg *agentcfg.AgentConfig, otel *agentote
 // manifest ownership (or granting D-Bus access for service checks).
 func manifestPermissionHint(err error) string {
 	if err != nil && (os.IsPermission(err) || strings.Contains(err.Error(), "permission denied")) {
-		return " — grant the service user read access to the manifest (chown to the agent user, e.g. 'chown fiia:root /etc/fiia/manifest.json && chmod 0400') or run the agent as root"
+		return " — grant the service user read access to the manifest (chown to the agent user, e.g. 'chown baseline:root /etc/baseline/manifest.json && chmod 0400') or run the agent as root"
 	}
 	return ""
 }
@@ -283,7 +292,7 @@ func runScan(scan_flag string) int {
 // installed package versions and service states, write the JSON manifest.
 // Exit codes: 0 = written, 2 = usage or write error. Warnings (missing files or
 // packages) are printed but still exit 0.
-func runWriteManifest(dest, files_flag, packages_flag, services_flag string, snapshot bool, scan_flag string) int {
+func runWriteManifest(dest, files_flag, packages_flag, services_flag, settings_flag string, snapshot bool, scan_flag string) int {
 	if dest == "" {
 		fmt.Fprintln(os.Stderr, "agent: -manifest is required with -write-manifest")
 		return 2
@@ -313,7 +322,9 @@ func runWriteManifest(dest, files_flag, packages_flag, services_flag string, sna
 		pkgs = append(pkgs, spec)
 	}
 
-	warnings, changed, err := audit.GenerateManifest(dest, files, pkgs, services, snapshot)
+	settings := splitCSV(settings_flag)
+
+	warnings, changed, err := audit.GenerateManifest(dest, files, pkgs, services, settings, snapshot)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "agent: write manifest: %v\n", err)
 		return 2
@@ -322,9 +333,9 @@ func runWriteManifest(dest, files_flag, packages_flag, services_flag string, sna
 		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 	}
 	if changed {
-		fmt.Printf("wrote %s (changed, files=%d packages=%d services=%d)\n", dest, len(files), len(pkgs), len(services))
+		fmt.Printf("wrote %s (changed, files=%d packages=%d services=%d settings=%d)\n", dest, len(files), len(pkgs), len(services), len(settings))
 	} else {
-		fmt.Printf("unchanged %s (files=%d packages=%d services=%d)\n", dest, len(files), len(pkgs), len(services))
+		fmt.Printf("unchanged %s (files=%d packages=%d services=%d settings=%d)\n", dest, len(files), len(pkgs), len(services), len(settings))
 	}
 	return 0
 }
@@ -347,7 +358,7 @@ func runRecordBegin(data_flag, dirs_flag string) int {
 
 // runRecordEnd diffs the pre-run index against the current file tree, merges
 // the changed files into the manifest, and refreshes the package/service
-// snapshots. The result is the ansible inventory for the node.
+// snapshots. The result is the node inventory for that change window.
 func runRecordEnd(manifest_flag, data_flag, dirs_flag string) int {
 	roots := splitCSV(dirs_flag)
 	if manifest_flag == "" || data_flag == "" || len(roots) == 0 {
@@ -360,6 +371,37 @@ func runRecordEnd(manifest_flag, data_flag, dirs_flag string) int {
 		return 2
 	}
 	fmt.Printf("wrote %s (files added=%d removed=%d)\n", manifest_flag, added, removed)
+	return 0
+}
+
+// runRecordSnapshot tracks every file under the roots as a baseline.
+func runRecordSnapshot(manifest_flag, dirs_flag string) int {
+	roots := splitCSV(dirs_flag)
+	if manifest_flag == "" || len(roots) == 0 {
+		fmt.Fprintln(os.Stderr, "agent: -record-snapshot needs -manifest <path> and -dirs <roots>")
+		return 2
+	}
+	n, err := audit.RecordSnapshot(manifest_flag, roots)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent: record-snapshot: %v\n", err)
+		return 2
+	}
+	fmt.Printf("wrote %s (files=%d)\n", manifest_flag, n)
+	return 0
+}
+
+// runRecordObserved merges a controller-captured file set into the manifest.
+func runRecordObserved(manifest_flag, data_flag string) int {
+	if manifest_flag == "" || data_flag == "" {
+		fmt.Fprintln(os.Stderr, "agent: -record-observed needs -manifest <path> and -data <observed.json>")
+		return 2
+	}
+	n, err := audit.RecordObserved(manifest_flag, data_flag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent: record-observed: %v\n", err)
+		return 2
+	}
+	fmt.Printf("wrote %s (files=%d)\n", manifest_flag, n)
 	return 0
 }
 

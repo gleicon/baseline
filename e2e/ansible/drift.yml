@@ -1,5 +1,5 @@
 ---
-# Fiia E2E stage 2 — introduce drift, verify detection, restore, verify clean.
+# Baseline E2E stage 2 — introduce drift, verify detection, restore, verify clean.
 # All changes happen inside the throwaway container only.
 #
 #   - overwrite the tracked sentinel        -> file:hash_mismatch
@@ -7,12 +7,12 @@
 #   - -check must exit 1 with both deviations listed
 #   - restore baseline (sentinel + curl removed) -> -check must exit 0 again
 
-- name: Fiia E2E — drift and detection (Ansible over Docker)
+- name: Baseline E2E — drift and detection (Ansible over Docker)
   hosts: all
 
   vars:
-    fiia_install_dir: /usr/local/bin
-    manifest_path: /etc/fiia/manifest.json
+    baseline_install_dir: /usr/local/bin
+    manifest_path: /etc/baseline/manifest.json
     baseline_content: "{{ lookup('file', baseline_file) }}"
 
   tasks:
@@ -24,13 +24,13 @@
           # unauthorized edit
           version: 99
           state: compromised
-        dest: /etc/fiia/sentinel
+        dest: /etc/baseline/sentinel
         mode: "0644"
 
     - name: Run check after file drift (expected to fail)
       ansible.builtin.command:
         argv:
-          - "{{ fiia_install_dir }}/fiia-agent"
+          - "{{ baseline_install_dir }}/baseline-agent"
           - "-check"
           - "-manifest"
           - "{{ manifest_path }}"
@@ -43,7 +43,7 @@
         that:
           - check_file_drift.rc == 1
           - "'DRIFT' in check_file_drift.stdout"
-          - "'file:hash_mismatch:/etc/fiia/sentinel' in check_file_drift.stdout"
+          - "'file:hash_mismatch:/etc/baseline/sentinel' in check_file_drift.stdout"
         fail_msg: >-
           expected file drift, got rc={{ check_file_drift.rc }}
           stdout={{ check_file_drift.stdout }}
@@ -59,7 +59,7 @@
     - name: Run check after package drift (expected to fail)
       ansible.builtin.command:
         argv:
-          - "{{ fiia_install_dir }}/fiia-agent"
+          - "{{ baseline_install_dir }}/baseline-agent"
           - "-check"
           - "-manifest"
           - "{{ manifest_path }}"
@@ -86,7 +86,7 @@
     - name: Enforce the manifest with -remediate
       ansible.builtin.command:
         argv:
-          - "{{ fiia_install_dir }}/fiia-agent"
+          - "{{ baseline_install_dir }}/baseline-agent"
           - "-check"
           - "-remediate"
           - "-manifest"
@@ -100,19 +100,19 @@
         that:
           - "'remediate:' in remediated.stdout"
           - "'pkg:unauthorized:curl' not in remediated.stdout"
-          - "'file:hash_mismatch:/etc/fiia/sentinel' in remediated.stdout"
+          - "'file:hash_mismatch:/etc/baseline/sentinel' in remediated.stdout"
         fail_msg: "unexpected remediation result: {{ remediated.stdout }}"
 
     - name: Restore the file baseline (the IaS fix for file deviations)
       ansible.builtin.copy:
         content: "{{ baseline_content }}"
-        dest: /etc/fiia/sentinel
+        dest: /etc/baseline/sentinel
         mode: "0644"
 
     - name: Re-run check (expected clean)
       ansible.builtin.command:
         argv:
-          - "{{ fiia_install_dir }}/fiia-agent"
+          - "{{ baseline_install_dir }}/baseline-agent"
           - "-check"
           - "-manifest"
           - "{{ manifest_path }}"

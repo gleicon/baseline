@@ -1,4 +1,4 @@
-# Fiia development and usage
+# Baseline development and usage
 
 ## Prerequisites
 
@@ -13,6 +13,7 @@ the VM dev loop (`brew install lima`); on Linux no VM is needed.
 | `-files a,b` | Absolute file paths to hash |
 | `-packages a,b` | Package names (`name` or `name=version` to pin) |
 | `-services a,b` | Service names (actual state is recorded) |
+| `-settings a,b` | Runtime keys to track (`sysctl:<name>`); the live value is recorded and checked |
 | `-snapshot` | Also record all installed packages and active services; later additions flag `pkg:unauthorized:*` / `svc:unauthorized:*` |
 | `-scan-playbook a.yml` | Extract managed paths from playbooks (feeds `-write-manifest`, or prints them alone) |
 | `-format text\|json` | `-check` output (default `text`); exits 0 clean / 1 drift / 2 error |
@@ -20,9 +21,11 @@ the VM dev loop (`brew install lima`); on Linux no VM is needed.
 | `-config PATH` | Agent TOML (`manifest_path` is the only required field) |
 | `-otlp-endpoint URL` | OTLP/HTTP receiver (default: `OTEL_EXPORTER_OTLP_ENDPOINT` env, else stdout) |
 | `-remediate` | Enforce the manifest (remove unauthorized packages/services, fix declared service states). Off by default; the standard fix is re-running the provisioning playbook. Files are never auto-restored. |
-| `-record-begin` | Index the file tree under `-dirs` into `-data` before a provisioning run |
-| `-record-end` | Diff `-data` against a fresh index and merge the changed files into `-manifest` (the ansible inventory) |
-| `-data PATH` | Record index path (record-begin writes it, record-end reads it) |
+| `-record-begin` | Index the file tree under `-dirs` into `-data` before a change window |
+| `-record-end` | Diff `-data` against a fresh index and merge the changed files into `-manifest` (the node inventory) |
+| `-record-snapshot` | Track every file under `-dirs` as a baseline (no diff); bootstrap an already-provisioned node |
+| `-record-observed` | Merge a controller-captured file set (`-data`, from the `baseline_capture` callback) into `-manifest` |
+| `-data PATH` | Record index / observed set path |
 | `-dirs a,b` | Record roots to index |
 
 ## Manifest sources
@@ -33,7 +36,7 @@ play (via `ansible -m command`, plain SSH, no daemon), from the CLI
 build the same file. Track what the playbook manages (`template:` / `copy:` /
 `lineinfile:` destinations); that is the drift surface.
 
-Golden rule: fiia checks only what the manifest documents. Packages and
+Golden rule: baseline checks only what the manifest documents. Packages and
 services are snapshotted automatically; files are never snapshotted, so
 document every file you want checked in Ansible or directly in the manifest.
 If it matters, promise it.
@@ -48,17 +51,45 @@ Linux, Homebrew on macOS. Generation and checking share the lookups.
 
 ## OTel signals
 
-`fiia.alive` gauge (missing series = silent node), `fiia.drift.status` (0/1/2),
-`fiia.drift.details` gauge while drifting (deviation list as the `deviations`
-label, for a fleet view), `fiia.checks.total` counter, one log record per check
-(`fiia.status`, `fiia.deviations[]`, `fiia.manifest_generated_at`).
+`baseline.alive` gauge (missing series = silent node), `baseline.drift.status` (0/1/2),
+`baseline.drift.details` gauge while drifting (deviation list as the `deviations`
+label, for a fleet view), `baseline.checks.total` counter, one log record per check
+(`baseline.status`, `baseline.deviations[]`, `baseline.manifest_generated_at`).
+
+## Dynamic settings
+
+Track live runtime values with `settings`. Backends are hard-coded (no
+arbitrary commands):
+
+| Key | Records |
+|-----|---------|
+| `sysctl:<name>` | live value of a single kernel parameter |
+| `sysctl:all` | every sysctl value, as a snapshot; a changed key reports per-key |
+| `sysctl:all:<prefix>` | only sysctls under the prefix, e.g. `sysctl:all:net.ipv4.*` |
+| `modules` | sha256 of the sorted loaded kernel module names (`/proc/modules`) |
+| `bpf` | sha256 of loaded eBPF program counts by type (requires `bpftool`) |
+
+```sh
+baseline-agent -write-manifest -manifest /etc/baseline/manifest.json \
+  -settings sysctl:net.ipv4.tcp_syncookies,modules -snapshot
+```
+
+`sysctl:all[:prefix]` snapshots the whole namespace (or a prefix of it) into the
+manifest's `sysctl_snapshot`; the check runs `sysctl -a` once and reports a
+`setting:mismatch:sysctl:<name>` per changed value. Use a prefix to skip the
+sysctls that are auto-tuned by the kernel or other tools. Each check re-queries
+the value; a divergence reports `setting:mismatch:...` and an unqueryable key
+`setting:unavailable:...` (see [drift-operations.md](drift-operations.md)). The
+`bpf` backend aggregates only program type counts, so transient load/unload
+churn stays out of the promise unless a whole program type appears or
+disappears.
 
 ## Config
 
 ```toml
 [agent]
 node_id               = "web-01"              # optional, defaults to hostname
-manifest_path         = "/etc/fiia/manifest.json"
+manifest_path         = "/etc/baseline/manifest.json"
 heartbeat_interval_sec = 60
 audit_interval_sec    = 1200
 audit_jitter_max_sec  = 120
@@ -79,8 +110,8 @@ All suites run in Docker with no host or VM changes.
 | Target | What it runs |
 |--------|--------------|
 | `make e2e` | Agent daemon to OTel collector; clean, file drift, package drift, restore |
-| `make e2e-ansible` | Provision a throwaway container with Ansible (`-write-manifest`, snapshot, `-remediate`), scan-playbook, drift, restore |
-| `make e2e-systemd` | The `fiia.fleet.agent` role in a real systemd container; service and file drift, permission alert |
+| `make e2e-ansible` | Provision a throwaway container with Ansible (`-write-manifest`, snapshot, `-remediate`), scan-playbook, record interception, settings (sysctl/modules/sysctl:all), drift, restore |
+| `make e2e-systemd` | The `baseline.fleet.agent` role in a real systemd container; service and file drift, permission alert |
 | `make e2e-live` | Daemon to collector to Prometheus to Grafana; leaves the stack running (tear down with `make e2e-live-down`) |
 
 The agent binary is the single manifest generator; Ansible invokes

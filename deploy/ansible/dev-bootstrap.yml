@@ -1,25 +1,25 @@
 ---
-# Fiia dev bootstrap: installs the agent on a Lima VM, Colima VM, or localhost
+# Baseline dev bootstrap: installs the agent on a Lima VM, Colima VM, or localhost
 # (Linux). Run via: make dev-deploy
 #
-# Override with -e: fiia_agent_binary (path to the linux binary),
-# fiia_otlp_endpoint (OTLP/HTTP receiver; omit for stdout export).
+# Override with -e: baseline_agent_binary (path to the linux binary),
+# baseline_otlp_endpoint (OTLP/HTTP receiver; omit for stdout export).
 
-- name: Bootstrap fiia agent on dev node
+- name: Bootstrap baseline agent on dev node
   hosts: fleet
   become: true
   vars:
-    fiia_heartbeat_interval_sec: 30
-    fiia_audit_interval_sec: 120
-    fiia_audit_jitter_max_sec: 10
-    fiia_manifest_files:
-      - /etc/fiia/sentinel
+    baseline_heartbeat_interval_sec: 30
+    baseline_audit_interval_sec: 120
+    baseline_audit_jitter_max_sec: 10
+    baseline_manifest_files:
+      - /etc/baseline/sentinel
       - /etc/motd
 
   tasks:
     - name: Create config directory
       ansible.builtin.file:
-        path: /etc/fiia
+        path: /etc/baseline
         state: directory
         mode: "0755"
 
@@ -31,14 +31,14 @@
         group: root
         mode: "0644"
       loop:
-        - dest: /etc/fiia/sentinel
+        - dest: /etc/baseline/sentinel
           content: |
-            # managed by fiia baseline — do not edit
+            # managed by baseline — do not edit
             version: 1
             state: ok
         - dest: /etc/motd
-          content: "Authorized access only. Activity is monitored by Fiia.\n"
+          content: "Authorized access only. Activity is monitored by Baseline.\n"
 
-    - name: Install and start fiia-agent
+    - name: Install and start baseline-agent
       ansible.builtin.include_role:
-        name: fiia.fleet.agent
+        name: baseline.fleet.agent

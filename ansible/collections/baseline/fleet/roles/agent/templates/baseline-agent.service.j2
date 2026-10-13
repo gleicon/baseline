@@ -1,0 +1,36 @@
+[Unit]
+Description=Baseline agent - configuration drift detection
+After=network-online.target dbus.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+User={{ baseline_user }}
+ExecStart={{ baseline_install_dir }}/baseline-agent -config {{ baseline_config_dir }}/agent.toml
+Restart=on-failure
+RestartSec=30
+{% if baseline_otlp_endpoint is defined and baseline_otlp_endpoint %}
+Environment=OTEL_EXPORTER_OTLP_ENDPOINT={{ baseline_otlp_endpoint }}
+{% endif %}
+
+CPUQuota=10%
+MemoryMax=256M
+IOReadBandwidthMax=/ 512K
+IOWriteBandwidthMax=/ 512K
+Nice=19
+IOSchedulingClass=idle
+
+WatchdogSec=120
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ baseline_log_dir }}
+PrivateTmp=true
+CapabilityBoundingSet=
+
+StandardOutput=append:{{ baseline_log_dir }}/agent.log
+StandardError=append:{{ baseline_log_dir }}/agent.log
+
+[Install]
+WantedBy=multi-user.target

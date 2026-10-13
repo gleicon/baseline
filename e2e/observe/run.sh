@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Live Fiia E2E: daemon -> OTel collector -> Prometheus (data + alert rules) ->
+# Live Baseline E2E: daemon -> OTel collector -> Prometheus (data + alert rules) ->
 # Grafana (dashboard). The stack STAYS UP so you can watch drift happen live.
 #
 #   make e2e-live          run the live scenario and leave the stack running
@@ -7,7 +7,7 @@
 #
 # Watch while it runs:
 #   Dashboard : http://localhost:3000  (user admin / password admin)
-#   Prometheus: http://localhost:9090  (/alerts shows FiiaDriftDetected firing)
+#   Prometheus: http://localhost:9090  (/alerts shows BaselineDriftDetected firing)
 #
 # The script drives the agent through clean -> file drift -> restored, and
 # prints each verdict as it flips on the dashboard.
@@ -16,7 +16,7 @@ set -euo pipefail
 E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$E2E_DIR/.." && pwd)"
 BASELINE="$REPO_ROOT/e2e/baseline/sentinel.txt"
-PROJECT="fiia-observe"
+PROJECT="baseline-observe"
 
 export DOCKER_API_VERSION="${DOCKER_API_VERSION:-1.44}"
 COMPOSE="docker compose -p $PROJECT -f $E2E_DIR/docker-compose.yml -f $E2E_DIR/docker-compose.observe.yml"
@@ -56,10 +56,10 @@ $COMPOSE down -v --remove-orphans >/dev/null 2>&1 || true
 $COMPOSE up -d --build --quiet-pull
 
 echo "=== wait for Prometheus to see the agent ==="
-wait_for "fiia.alive present in Prometheus" "fiia_alive" "1" 120
+wait_for "baseline.alive present in Prometheus" "baseline_alive" "1" 120
 
 echo "=== stage 1: baseline reads clean ==="
-wait_for "clean verdict (fiia_drift_status=0)" "fiia_drift_status" "0" 120
+wait_for "clean verdict (baseline_drift_status=0)" "baseline_drift_status" "0" 120
 
 echo ""
 echo "Watch the dashboard now:  http://localhost:3000  (admin/admin)"
@@ -67,31 +67,31 @@ echo "Prometheus alerts:        http://localhost:9090/alerts"
 echo ""
 
 echo "=== stage 2: introduce drift (watch the dashboard flip) ==="
-$COMPOSE exec -T agent sh -c 'echo "# tamper" >> /etc/fiia/sentinel'
-wait_for "drift verdict (fiia_drift_status=1)" "fiia_drift_status" "1" 120
+$COMPOSE exec -T agent sh -c 'echo "# tamper" >> /etc/baseline/sentinel'
+wait_for "drift verdict (baseline_drift_status=1)" "baseline_drift_status" "1" 120
 i=0
 while [ $i -lt 30 ]; do
   a="$(alert_state)"
-  echo "  FiiaDriftDetected alert state: $([ -n "$a" ] && echo FIRING || echo pending/resolved)"
-  case "$a" in *FiiaDriftDetected*) break ;; esac
+  echo "  BaselineDriftDetected alert state: $([ -n "$a" ] && echo FIRING || echo pending/resolved)"
+  case "$a" in *BaselineDriftDetected*) break ;; esac
   sleep 2; i=$((i + 1))
 done
 
 echo "=== stage 3: restore baseline (watch it go clean again) ==="
 AGENT_CTR="$($COMPOSE ps -q agent)"
-docker cp "$BASELINE" "$AGENT_CTR:/etc/fiia/sentinel"
-wait_for "clean verdict again (fiia_drift_status=0)" "fiia_drift_status" "0" 120
+docker cp "$BASELINE" "$AGENT_CTR:/etc/baseline/sentinel"
+wait_for "clean verdict again (baseline_drift_status=0)" "baseline_drift_status" "0" 120
 i=0
 while [ $i -lt 30 ]; do
   a="$(alert_state)"
-  case "$a" in *FiiaDriftDetected*) sleep 2; i=$((i + 1)) ;; *) break ;; esac
+  case "$a" in *BaselineDriftDetected*) sleep 2; i=$((i + 1)) ;; *) break ;; esac
 done
-echo "  FiiaDriftDetected alert: resolved (no longer firing)"
+echo "  BaselineDriftDetected alert: resolved (no longer firing)"
 
 echo ""
 echo "E2E live: all stages passed — stack is still running."
 echo ""
-echo "  Dashboard : http://localhost:3000  (admin/admin)  dashboard 'Fiia — drift detection'"
+echo "  Dashboard : http://localhost:3000  (admin/admin)  dashboard 'Baseline — drift detection'"
 echo "  Prometheus: http://localhost:9090  (/alerts, /query)"
 echo "  Collector : http://localhost:9464/metrics"
 echo ""

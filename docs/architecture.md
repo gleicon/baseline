@@ -1,6 +1,6 @@
-# Fiia architecture
+# Baseline architecture
 
-One binary (`fiia-agent`) plus the `fiia.fleet` Ansible collection. No server
+One binary (`baseline-agent`) plus the `baseline.fleet` Ansible collection. No server
 side. Verdicts and liveness go to your OpenTelemetry pipeline, where all
 alerting happens. The agent binary is the single manifest generator; Ansible
 invokes `-write-manifest` as the last task.
@@ -8,18 +8,18 @@ invokes `-write-manifest` as the last task.
 ```
 provision (ansible, plain SSH)              operate (OTel backend)
 ──────────────────────────────              ─────────────────────
-fiia-agent -write-manifest (last task)
-  → /etc/fiia/manifest.json          fiia-agent (systemd unit)
-     │                                 ├─ heartbeat loop → fiia.alive
-     │                                 ├─ audit loop → fiia.drift.status
-     │                                 ├─   + fiia.drift.details (deviations)
+baseline-agent -write-manifest (last task)
+  → /etc/baseline/manifest.json          baseline-agent (systemd unit)
+     │                                 ├─ heartbeat loop → baseline.alive
+     │                                 ├─ audit loop → baseline.drift.status
+     │                                 ├─   + baseline.drift.details (deviations)
      │                                 ├─   + remediate (opt-in)
-     └─ promise ───────────────────→  └─ check log record (fiia.deviations)
+     └─ promise ───────────────────→  └─ check log record (baseline.deviations)
                                               │  stdout (default) or OTLP/HTTP
                                               ▼
                                      collector → Grafana / Alertmanager
-                                       ├─ absent fiia.alive → node silent
-                                       └─ fiia.drift.status == 1 → drift
+                                       ├─ absent baseline.alive → node silent
+                                       └─ baseline.drift.status == 1 → drift
 ```
 
 ## Components
@@ -32,7 +32,7 @@ fiia-agent -write-manifest (last task)
 | `internal/agent/otel` | OTel providers; gauges, counter, log records |
 | `internal/agent/sdnotify` | Inline sd_notify, no CGO |
 | `internal/assert` | Precondition helper |
-| `fiia.fleet` collection | `agent` role (provision-time), invokes the agent binary |
+| `baseline.fleet` collection | `agent` role (provision-time), invokes the agent binary |
 
 ## Rules
 

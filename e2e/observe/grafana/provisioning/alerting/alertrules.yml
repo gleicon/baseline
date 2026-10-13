@@ -1,19 +1,19 @@
 apiVersion: 1
 groups:
   - orgId: 1
-    name: Fiia
-    folder: Fiia
+    name: Baseline
+    folder: Baseline
     interval: 10s
     rules:
-      - uid: fiia-drift-alert
-        title: Fiia drift detected
+      - uid: baseline-drift-alert
+        title: Baseline drift detected
         condition: C
         data:
           - refId: A
             datasourceUid: prometheus
             model:
               refId: A
-              expr: fiia_drift_status == 1
+              expr: baseline_drift_status == 1
               instant: true
               range: false
             relativeTimeRange:
@@ -44,18 +44,18 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: Fiia drift detected on {{ $labels.host_name }}
-          description: "fiia_drift_status=1 on {{ $labels.host_name }}. See the Drifted nodes panel / fiia_drift_details for the exact deviations; re-run the provisioning playbook (IaS) or use -remediate to fix."
+          summary: Baseline drift detected on {{ $labels.host_name }}
+          description: "baseline_drift_status=1 on {{ $labels.host_name }}. See the Drifted nodes panel / baseline_drift_details for the exact deviations; re-run the provisioning playbook (IaS) or use -remediate to fix."
 
-      - uid: fiia-check-error-alert
-        title: Fiia check error
+      - uid: baseline-check-error-alert
+        title: Baseline check error
         condition: C
         data:
           - refId: A
             datasourceUid: prometheus
             model:
               refId: A
-              expr: fiia_drift_status == 2
+              expr: baseline_drift_status == 2
               instant: true
               range: false
             relativeTimeRange:
@@ -86,18 +86,18 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: Fiia cannot verify configuration on {{ $labels.host_name }}
-          description: fiia_drift_status=2 on {{ $labels.host_name }}. The agent cannot read or verify its manifest. A normal install needs no OS changes — grant the service user read access to the manifest (e.g. chown fiia:root /etc/fiia/manifest.json && chmod 0400) or run the agent as root.
+          summary: Baseline cannot verify configuration on {{ $labels.host_name }}
+          description: baseline_drift_status=2 on {{ $labels.host_name }}. The agent cannot read or verify its manifest. A normal install needs no OS changes — grant the service user read access to the manifest (e.g. chown baseline:root /etc/baseline/manifest.json && chmod 0400) or run the agent as root.
 
-      - uid: fiia-node-silent-alert
-        title: Fiia node silent
+      - uid: baseline-node-silent-alert
+        title: Baseline node silent
         condition: C
         data:
           - refId: A
             datasourceUid: prometheus
             model:
               refId: A
-              expr: absent(fiia_alive)
+              expr: absent(baseline_alive)
               instant: true
               range: false
             relativeTimeRange:
@@ -123,7 +123,7 @@ groups:
                     type: gt
                     params: [0]
         for: 30s
-        # absent(fiia_alive) returns empty (no data) while the agent IS alive;
+        # absent(baseline_alive) returns empty (no data) while the agent IS alive;
         # treat that as OK, not an alert. When the agent goes silent, absent()
         # returns 1 and the rule fires.
         noDataState: OK
@@ -131,5 +131,5 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: No fiia.alive series — node silent
+          summary: No baseline.alive series — node silent
           description: The agent heartbeat is missing; the node may be down or the agent stopped.

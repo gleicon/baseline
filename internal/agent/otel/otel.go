@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gleicon/fiia/internal/agent/audit"
-	"github.com/gleicon/fiia/internal/assert"
+	"github.com/gleicon/baseline/internal/agent/audit"
+	"github.com/gleicon/baseline/internal/assert"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
@@ -29,9 +29,9 @@ const (
 
 // Handle emits drift verdicts and liveness into the operator's OTel pipeline.
 // All alerting happens downstream (collector, Grafana, Alertmanager):
-//   - absence of fiia.alive → node silent (dead-man alert in the backend)
-//   - fiia.drift.status == 1 → drift detected
-//   - fiia.drift.status == 2 → check error (manifest missing/unreadable)
+//   - absence of baseline.alive → node silent (dead-man alert in the backend)
+//   - baseline.drift.status == 1 → drift detected
+//   - baseline.drift.status == 2 → check error (manifest missing/unreadable)
 type Handle struct {
 	nodeID  string
 	alive   metric.Int64Gauge
@@ -93,7 +93,7 @@ func newLogExporter(ctx context.Context, endpoint string) (sdklog.Exporter, erro
 	return exp, nil
 }
 
-// driftStatus maps a check status to the fiia.drift.status gauge value.
+// driftStatus maps a check status to the baseline.drift.status gauge value.
 func driftStatus(status string) int64 {
 	switch status {
 	case audit.StatusOK:
@@ -115,7 +115,7 @@ func Setup(ctx context.Context, endpoint, nodeID string) (*Handle, func(context.
 
 	res, err := sdkresource.New(ctx,
 		sdkresource.WithAttributes(
-			attribute.String("service.name", "fiia-agent"),
+			attribute.String("service.name", "baseline-agent"),
 			attribute.String("host.name", nodeID),
 		),
 	)
@@ -142,26 +142,26 @@ func Setup(ctx context.Context, endpoint, nodeID string) (*Handle, func(context.
 		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)),
 	)
 
-	meter := meterProvider.Meter("fiia-agent")
-	alive, err := meter.Int64Gauge("fiia.alive",
+	meter := meterProvider.Meter("baseline-agent")
+	alive, err := meter.Int64Gauge("baseline.alive",
 		metric.WithDescription("1 when the agent heartbeat was emitted; alert on absence"))
 	if err != nil {
-		return nil, nil, fmt.Errorf("otel fiia.alive gauge: %w", err)
+		return nil, nil, fmt.Errorf("otel baseline.alive gauge: %w", err)
 	}
-	status, err := meter.Int64Gauge("fiia.drift.status",
+	status, err := meter.Int64Gauge("baseline.drift.status",
 		metric.WithDescription("0 clean, 1 drift detected, 2 check error"))
 	if err != nil {
-		return nil, nil, fmt.Errorf("otel fiia.drift.status gauge: %w", err)
+		return nil, nil, fmt.Errorf("otel baseline.drift.status gauge: %w", err)
 	}
-	details, err := meter.Int64Gauge("fiia.drift.details",
+	details, err := meter.Int64Gauge("baseline.drift.details",
 		metric.WithDescription("deviation count while drifting; carries the deviation list as the 'deviations' label"))
 	if err != nil {
-		return nil, nil, fmt.Errorf("otel fiia.drift.details gauge: %w", err)
+		return nil, nil, fmt.Errorf("otel baseline.drift.details gauge: %w", err)
 	}
-	checks, err := meter.Int64Counter("fiia.checks.total",
+	checks, err := meter.Int64Counter("baseline.checks.total",
 		metric.WithDescription("manifest checks completed"))
 	if err != nil {
-		return nil, nil, fmt.Errorf("otel fiia.checks.total counter: %w", err)
+		return nil, nil, fmt.Errorf("otel baseline.checks.total counter: %w", err)
 	}
 
 	shutdown := func(ctx context.Context) error {
@@ -177,11 +177,11 @@ func Setup(ctx context.Context, endpoint, nodeID string) (*Handle, func(context.
 		status:  status,
 		details: details,
 		checks:  checks,
-		logger:  loggerProvider.Logger("fiia-agent"),
+		logger:  loggerProvider.Logger("baseline-agent"),
 	}, shutdown, nil
 }
 
-// EmitAlive records one heartbeat. Backends alert on a missing fiia.alive series.
+// EmitAlive records one heartbeat. Backends alert on a missing baseline.alive series.
 func (h *Handle) EmitAlive(ctx context.Context) {
 	h.alive.Record(ctx, 1, metric.WithAttributes(attribute.String("host.name", h.nodeID)))
 }
@@ -191,7 +191,7 @@ func (h *Handle) EmitAlive(ctx context.Context) {
 func (h *Handle) EmitCheck(ctx context.Context, result audit.CheckResult) {
 	// The status gauge value already encodes the verdict (0/1/2); do NOT add a
 	// per-status label or Prometheus gets one series per status value. The
-	// label set must stay constant across emits so fiia_drift_status is a
+	// label set must stay constant across emits so baseline_drift_status is a
 	// single series.
 	statusAttrs := []attribute.KeyValue{attribute.String("host.name", h.nodeID)}
 	h.status.Record(ctx, driftStatus(result.Status), metric.WithAttributes(statusAttrs...))
@@ -220,9 +220,9 @@ func (h *Handle) EmitCheck(ctx context.Context, result audit.CheckResult) {
 	rec.SetBody(attribute.StringValue(checkBody(result)))
 	rec.AddAttributes(
 		attribute.String("host.name", h.nodeID),
-		attribute.String("fiia.status", result.Status),
-		attribute.StringSlice("fiia.deviations", devs),
-		attribute.Int64("fiia.manifest_generated_at", result.ManifestGeneratedAt),
+		attribute.String("baseline.status", result.Status),
+		attribute.StringSlice("baseline.deviations", devs),
+		attribute.Int64("baseline.manifest_generated_at", result.ManifestGeneratedAt),
 	)
 	h.logger.Emit(ctx, rec)
 }

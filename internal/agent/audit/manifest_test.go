@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	agentcfg "github.com/gleicon/fiia/internal/agent/config"
+	agentcfg "github.com/gleicon/baseline/internal/agent/config"
 )
 
 func writeTestManifest(t *testing.T, dir string, m Manifest) string {
@@ -57,7 +57,7 @@ func TestRunManifestNotFound(t *testing.T) {
 
 func TestRunManifestCleanFile(t *testing.T) {
 	dir := t.TempDir()
-	content := []byte("hello fiia")
+	content := []byte("hello baseline")
 	file_path := filepath.Join(dir, "managed.conf")
 	if err := os.WriteFile(file_path, content, 0644); err != nil {
 		t.Fatalf("write file: %v", err)

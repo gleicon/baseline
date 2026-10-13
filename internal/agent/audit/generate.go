@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gleicon/fiia/internal/assert"
+	"github.com/gleicon/baseline/internal/assert"
 )
 
 // PackageSpec declares one package to record in a generated manifest.
@@ -33,11 +33,12 @@ func ParsePackageSpec(s string) (PackageSpec, error) {
 
 // GenerateManifest builds a manifest from live system state and writes it to dest.
 // This is the single canonical manifest generator: Ansible invokes it via
-// -write-manifest (the fiia.fleet.agent role does this as its last step), and
+// -write-manifest (the baseline.fleet.agent role does this as its last step), and
 // the agent reads the same file at audit time.
-// Warnings are non-fatal (missing packages, unreadable files); changed reports
-// whether content differs from any existing manifest (ignoring generated_at).
-func GenerateManifest(dest string, files []string, pkgs []PackageSpec, svcs []string, snapshot bool) (warnings []string, changed bool, err error) {
+// Warnings are non-fatal (missing packages, unreadable files, unqueryable
+// settings); changed reports whether content differs from any existing
+// manifest (ignoring generated_at).
+func GenerateManifest(dest string, files []string, pkgs []PackageSpec, svcs []string, settings []string, snapshot bool) (warnings []string, changed bool, err error) {
 	assert.True(dest != "", "dest must not be empty")
 
 	m := Manifest{
@@ -48,6 +49,7 @@ func GenerateManifest(dest string, files []string, pkgs []PackageSpec, svcs []st
 	warnings = append(warnings, collectFiles(files, &m)...)
 	warnings = append(warnings, collectPackages(pkgs, &m)...)
 	warnings = append(warnings, collectServices(svcs, &m)...)
+	warnings = append(warnings, collectSettings(settings, &m, querySettingValue)...)
 
 	if snapshot {
 		m.PackageSnapshot = ListInstalledPackages()
@@ -154,6 +156,26 @@ func collectServices(svcs []string, m *Manifest) []string {
 		if !enabled {
 			warnings = append(warnings, fmt.Sprintf("service not enabled at provisioning time: %s", name))
 		}
+	}
+	return warnings
+}
+
+// collectSettings records the live value of each runtime key, warning on keys
+// that cannot be queried at provisioning time. Deck keys (sysctl:all[:prefix])
+// are routed to the sysctl snapshot.
+func collectSettings(keys []string, m *Manifest, query func(name string) (string, error)) []string {
+	var warnings []string
+	for _, key := range keys {
+		if _, deck := isSysctlDeckKey(key); deck {
+			warnings = append(warnings, collectSysctlDeck(key, m)...)
+			continue
+		}
+		value, err := query(key)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("setting not queryable at provisioning time: %s", key))
+			continue
+		}
+		m.Settings = append(m.Settings, ManifestSetting{Key: key, Value: value})
 	}
 	return warnings
 }

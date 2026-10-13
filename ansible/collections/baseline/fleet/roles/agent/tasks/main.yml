@@ -1,0 +1,121 @@
+---
+- name: Create baseline system user (no login shell, no sudo)
+  ansible.builtin.user:
+    name: "{{ baseline_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+    state: present
+
+- name: Create config and log directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ baseline_config_dir }}", owner: root, mode: "0755" }
+    - { path: "{{ baseline_log_dir }}", owner: "{{ baseline_user }}", mode: "0750" }
+
+- name: Write agent configuration (0400)
+  ansible.builtin.template:
+    src: agent.toml.j2
+    dest: "{{ baseline_config_dir }}/agent.toml"
+    owner: "{{ baseline_user }}"
+    group: root
+    mode: "0400"
+  notify: Restart baseline-agent
+
+- name: Assert an agent binary source is configured
+  ansible.builtin.assert:
+    that:
+      - (baseline_agent_binary is defined and baseline_agent_binary != "") or
+        (baseline_release_base is defined and baseline_release_base != "")
+    fail_msg: "Set baseline_agent_binary (local copy) or baseline_release_base (download)."
+
+- name: Map the release artifact architecture
+  ansible.builtin.set_fact:
+    baseline_release_arch: >-
+      {{ 'arm64' if ansible_architecture in ['aarch64', 'arm64'] else 'amd64' }}
+  when: baseline_agent_binary is not defined or baseline_agent_binary == ""
+
+- name: Install baseline-agent binary from a local path
+  ansible.builtin.copy:
+    src: "{{ baseline_agent_binary }}"
+    dest: "{{ baseline_install_dir }}/baseline-agent"
+    owner: root
+    group: root
+    mode: "0755"
+  when: baseline_agent_binary is defined and baseline_agent_binary != ""
+  notify: Restart baseline-agent
+
+- name: Download baseline-agent binary from the release
+  ansible.builtin.get_url:
+    url: "{{ baseline_release_base }}/baseline-agent-linux-{{ baseline_release_arch }}"
+    dest: "{{ baseline_install_dir }}/baseline-agent"
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - baseline_agent_binary is not defined or baseline_agent_binary == ""
+    - baseline_release_base is defined and baseline_release_base != ""
+  notify: Restart baseline-agent
+
+- name: Install systemd unit
+  ansible.builtin.template:
+    src: baseline-agent.service.j2
+    dest: /etc/systemd/system/baseline-agent.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart baseline-agent
+
+- name: Install logrotate config
+  ansible.builtin.copy:
+    src: baseline-logrotate
+    dest: /etc/logrotate.d/baseline
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Build manifest record command
+  ansible.builtin.set_fact:
+    baseline_record_argv: "{{ [baseline_install_dir ~ '/baseline-agent', '-write-manifest', '-manifest', baseline_manifest_path, '-files', (baseline_manifest_files | join(',')), '-packages', (baseline_manifest_packages | join(',')), '-services', (baseline_manifest_services | join(','))] + (['-snapshot'] if baseline_manifest_snapshot else []) }}"
+  when: baseline_manage_manifest
+
+- name: Record drift manifest (last provisioning step)
+  ansible.builtin.command:
+    argv: "{{ baseline_record_argv }}"
+  register: baseline_record
+  changed_when: "'wrote ' in baseline_record.stdout"
+  when: baseline_manage_manifest
+
+- name: Make manifest readable by the baseline service account (still 0400)
+  ansible.builtin.file:
+    path: "{{ baseline_manifest_path }}"
+    owner: "{{ baseline_user }}"
+    group: root
+    mode: "0400"
+  when: baseline_manage_manifest
+
+- name: Enable and start baseline-agent
+  ansible.builtin.systemd:
+    name: baseline-agent
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Verify baseline reads clean
+  ansible.builtin.command:
+    argv:
+      - "{{ baseline_install_dir }}/baseline-agent"
+      - -check
+      - -manifest
+      - "{{ baseline_manifest_path }}"
+  register: baseline_check
+  changed_when: false
+  failed_when: baseline_check.rc != 0
+  when: baseline_manage_manifest

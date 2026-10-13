@@ -36,7 +36,7 @@ for line in blob.splitlines():
     for rm in doc.get("resourceMetrics", []):
         for sm in rm.get("scopeMetrics", []):
             for m in sm.get("metrics", []):
-                if m.get("name") != "fiia.drift.status":
+                if m.get("name") != "baseline.drift.status":
                     continue
                 data = m.get("gauge", {}).get("dataPoints", [])
                 if any(dp.get("asInt") == want for dp in data):
@@ -50,7 +50,7 @@ EOF
     sleep 2
     waited=$((waited + 2))
   done
-  fail "$label (no fiia.drift.status=$want within ${timeout}s)"
+  fail "$label (no baseline.drift.status=$want within ${timeout}s)"
 }
 
 # $1 = timeout seconds, $2 = stage label — liveness gauge must be present
@@ -68,7 +68,7 @@ with open(sys.argv[1]) as fh:
         for rm in doc.get("resourceMetrics", []):
             for sm in rm.get("scopeMetrics", []):
                 for m in sm.get("metrics", []):
-                    if m.get("name") == "fiia.alive" and any(
+                    if m.get("name") == "baseline.alive" and any(
                             dp.get("asInt") == "1"
                             for dp in m.get("gauge", {}).get("dataPoints", [])):
                         sys.exit(0)
@@ -81,7 +81,7 @@ EOF
     sleep 2
     waited=$((waited + 2))
   done
-  fail "$label (no fiia.alive series within ${timeout}s)"
+  fail "$label (no baseline.alive series within ${timeout}s)"
 }
 
 # $1 = regex pattern, $2 = timeout seconds, $3 = stage label
@@ -107,12 +107,12 @@ mkdir -p "$E2E_DIR/out"
 $COMPOSE up -d --build --quiet-pull
 
 echo "=== stage 1: baseline reads clean + heartbeat exported ==="
-wait_for_status 0 90 "clean verdict exported (fiia.drift.status=0)"
-wait_for_alive 30 "liveness gauge exported (fiia.alive=1)"
+wait_for_status 0 90 "clean verdict exported (baseline.drift.status=0)"
+wait_for_alive 30 "liveness gauge exported (baseline.alive=1)"
 
 echo "=== stage 2: introduce file drift ==="
-$COMPOSE exec -T agent sh -c 'echo "# tamper" >> /etc/fiia/sentinel'
-wait_for_status 1 90 "drift verdict exported (fiia.drift.status=1)"
+$COMPOSE exec -T agent sh -c 'echo "# tamper" >> /etc/baseline/sentinel'
+wait_for_status 1 90 "drift verdict exported (baseline.drift.status=1)"
 wait_for_deviation "hash_mismatch" 30 "log record carries hash_mismatch deviation"
 
 echo "=== stage 3: introduce package drift (snapshot-unauthorized) ==="
@@ -122,9 +122,9 @@ wait_for_deviation "pkg:unauthorized:vim-tiny" 60 \
 
 echo "=== stage 4: restore baseline ==="
 AGENT_CTR="$($COMPOSE ps -q agent 2>/dev/null)"
-docker cp "$E2E_DIR/baseline/sentinel.txt" "$AGENT_CTR:/etc/fiia/sentinel"
+docker cp "$E2E_DIR/baseline/sentinel.txt" "$AGENT_CTR:/etc/baseline/sentinel"
 $COMPOSE exec -T agent sh -c 'apt-get purge -y -q vim-tiny'
-wait_for_status 0 90 "clean verdict exported again (fiia.drift.status=0)"
+wait_for_status 0 90 "clean verdict exported again (baseline.drift.status=0)"
 
 echo ""
 echo "E2E: all stages passed"

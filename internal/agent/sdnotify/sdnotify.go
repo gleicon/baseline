@@ -1,7 +1,7 @@
 package sdnotify
 
 import (
-	"github.com/gleicon/fiia/internal/assert"
+	"github.com/gleicon/baseline/internal/assert"
 	"log"
 	"net"
 	"os"

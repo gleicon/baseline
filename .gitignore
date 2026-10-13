@@ -1,8 +1,8 @@
 # Binaries
-fiia-agent
-fiia-agent-*
-fiia-hub
-fiia-hub-*
+baseline-agent
+baseline-agent-*
+baseline-hub
+baseline-hub-*
 
 # Go build cache
 /vendor/
@@ -20,7 +20,7 @@ dev/.backend
 *.sqlite3
 
 # Queue data
-/var/lib/fiia/queue/
+/var/lib/baseline/queue/
 
 # Dev runtime output
 dev/agent.log

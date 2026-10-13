@@ -1,8 +1,8 @@
 package audit
 
 import (
-	agentcfg "github.com/gleicon/fiia/internal/agent/config"
-	"github.com/gleicon/fiia/internal/assert"
+	agentcfg "github.com/gleicon/baseline/internal/agent/config"
+	"github.com/gleicon/baseline/internal/assert"
 )
 
 // LoadFile reads and validates the manifest at path.

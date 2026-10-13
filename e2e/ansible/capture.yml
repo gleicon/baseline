@@ -1,0 +1,14 @@
+---
+# Controller-side capture for the E2E: run with the baseline_capture callback
+# enabled so it writes an observed file per host to BASELINE_OBSERVED_DIR.
+- hosts: all
+  tasks:
+    - name: Write a managed config
+      ansible.builtin.copy:
+        content: "mode=ok\n"
+        dest: /tmp/capture.conf
+
+    - name: Write another managed config
+      ansible.builtin.copy:
+        content: "kv\n"
+        dest: /tmp/capture2.conf

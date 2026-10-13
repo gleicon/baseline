@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/BurntSushi/toml"
-	"github.com/gleicon/fiia/internal/assert"
+	"github.com/gleicon/baseline/internal/assert"
 )
 
 const (

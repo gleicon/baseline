@@ -1,22 +1,22 @@
 ---
-# Fiia E2E (systemd) stage 2 — drift the tracked service + a tracked file,
+# Baseline E2E (systemd) stage 2 — drift the tracked service + a tracked file,
 # prove the running daemon detects it, then restore and prove clean.
 #
 # Exercises: svc:inactive / svc:disabled (service-state drift), the daemon's
 # own audit loop reporting DRIFT to its log, and restore-to-clean.
 
-- name: Fiia E2E — drift, daemon detection, restore (systemd)
+- name: Baseline E2E — drift, daemon detection, restore (systemd)
   hosts: all
 
   vars:
-    fiia_install_dir: /usr/local/bin
-    manifest_path: /etc/fiia/manifest.json
+    baseline_install_dir: /usr/local/bin
+    manifest_path: /etc/baseline/manifest.json
     baseline_content: "{{ lookup('file', baseline_file) }}"
 
   tasks:
     - name: Stop and disable the tracked service
       ansible.builtin.systemd:
-        name: fiia-test.service
+        name: baseline-test.service
         enabled: false
         state: stopped
 
@@ -26,14 +26,14 @@
           # unauthorized edit
           version: 99
           state: compromised
-        dest: /etc/fiia/sentinel
+        dest: /etc/baseline/sentinel
         mode: "0644"
 
     - name: Wait for the running daemon to report DRIFT to its log
       ansible.builtin.shell:
         cmd: |
           for i in $(seq 1 20); do
-            if grep "audit:" /var/log/fiia/agent.log | tail -n 1 | grep -q "DRIFT"; then
+            if grep "audit:" /var/log/baseline/agent.log | tail -n 1 | grep -q "DRIFT"; then
               exit 0
             fi
             sleep 2
@@ -44,7 +44,7 @@
     - name: One-shot check (expected to detect)
       ansible.builtin.command:
         argv:
-          - "{{ fiia_install_dir }}/fiia-agent"
+          - "{{ baseline_install_dir }}/baseline-agent"
           - "-check"
           - "-manifest"
           - "{{ manifest_path }}"
@@ -56,9 +56,9 @@
       ansible.builtin.assert:
         that:
           - check_drift.rc == 1
-          - "'file:hash_mismatch:/etc/fiia/sentinel' in check_drift.stdout"
-          - "'svc:inactive:fiia-test' in check_drift.stdout"
-          - "'svc:disabled:fiia-test' in check_drift.stdout"
+          - "'file:hash_mismatch:/etc/baseline/sentinel' in check_drift.stdout"
+          - "'svc:inactive:baseline-test' in check_drift.stdout"
+          - "'svc:disabled:baseline-test' in check_drift.stdout"
         fail_msg: >-
           expected file+service drift, got rc={{ check_drift.rc }}
           stdout={{ check_drift.stdout }}
@@ -70,12 +70,12 @@
     - name: Restore baseline sentinel
       ansible.builtin.copy:
         content: "{{ baseline_content }}"
-        dest: /etc/fiia/sentinel
+        dest: /etc/baseline/sentinel
         mode: "0644"
 
     - name: Re-enable and start the tracked service
       ansible.builtin.systemd:
-        name: fiia-test.service
+        name: baseline-test.service
         enabled: true
         state: started
         daemon_reload: true
@@ -84,7 +84,7 @@
       ansible.builtin.shell:
         cmd: |
           for i in $(seq 1 20); do
-            if grep "audit:" /var/log/fiia/agent.log | tail -n 1 | grep -q "clean"; then
+            if grep "audit:" /var/log/baseline/agent.log | tail -n 1 | grep -q "clean"; then
               exit 0
             fi
             sleep 2
@@ -95,7 +95,7 @@
     - name: One-shot check (expected clean)
       ansible.builtin.command:
         argv:
-          - "{{ fiia_install_dir }}/fiia-agent"
+          - "{{ baseline_install_dir }}/baseline-agent"
           - "-check"
           - "-manifest"
           - "{{ manifest_path }}"
@@ -109,16 +109,16 @@
           - "'OK' in check_restored.stdout"
         fail_msg: "expected clean after restore, got {{ check_restored.stdout }}"
 
-    - name: Assert fiia-agent still active (watchdog did not kill it)
+    - name: Assert baseline-agent still active (watchdog did not kill it)
       ansible.builtin.systemd:
-        name: fiia-agent
+        name: baseline-agent
       register: agent_svc
 
     - name: Assert still active
       ansible.builtin.assert:
         that:
           - agent_svc.status.ActiveState == "active"
-        fail_msg: "fiia-agent no longer active: {{ agent_svc.status }}"
+        fail_msg: "baseline-agent no longer active: {{ agent_svc.status }}"
 
     # ── permission alert: when systemctl cannot confirm a state (manager query
     # ── denied / unreachable, rc=4), the agent must alert svc:unverifiable with
@@ -139,7 +139,7 @@
     - name: Run check with the unverifiable manager (expect permission alert)
       ansible.builtin.command:
         argv:
-          - "{{ fiia_install_dir }}/fiia-agent"
+          - "{{ baseline_install_dir }}/baseline-agent"
           - "-check"
           - "-manifest"
           - "{{ manifest_path }}"
@@ -151,8 +151,8 @@
       ansible.builtin.assert:
         that:
           - check_perm.rc == 1
-          - "'svc:unverifiable:fiia-test' in check_perm.stdout"
-          - "'svc:inactive:fiia-test' not in check_perm.stdout"
+          - "'svc:unverifiable:baseline-test' in check_perm.stdout"
+          - "'svc:inactive:baseline-test' not in check_perm.stdout"
           - "'D-Bus permission denied' in check_perm.stdout"
         fail_msg: >-
           expected a permission alert, got rc={{ check_perm.rc }}
@@ -166,7 +166,7 @@
     - name: Re-run check (expected clean again)
       ansible.builtin.command:
         argv:
-          - "{{ fiia_install_dir }}/fiia-agent"
+          - "{{ baseline_install_dir }}/baseline-agent"
           - "-check"
           - "-manifest"
           - "{{ manifest_path }}"

@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/gleicon/fiia/internal/assert"
+	"github.com/gleicon/baseline/internal/assert"
 	"gopkg.in/yaml.v3"
 )
 

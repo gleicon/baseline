@@ -198,3 +198,101 @@ func mustHash(t *testing.T, path string) string {
 	}
 	return sum
 }
+
+func TestRecordSnapshotBootstrap(t *testing.T) {
+	dir := t.TempDir()
+	conf := filepath.Join(dir, "etc")
+	manifest := filepath.Join(dir, "manifest.json")
+
+	writeTempFile(t, filepath.Join(conf, "a.conf"), "a=1\n", time.Time{})
+	writeTempFile(t, filepath.Join(conf, "b.conf"), "b=2\n", time.Time{})
+
+	n, err := RecordSnapshot(manifest, []string{conf})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("expected 2 tracked files, got %d", n)
+	}
+	m, err := LoadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := map[string]bool{}
+	for _, f := range m.Files {
+		paths[filepath.Base(f.Path)] = true
+		if f.SHA256 == "" || f.Mode == "" {
+			t.Fatalf("tracked file %s missing attrs", f.Path)
+		}
+	}
+	if !paths["a.conf"] || !paths["b.conf"] {
+		t.Fatalf("unexpected baseline %v", paths)
+	}
+
+	// Tampering a baseline file is drift.
+	if err := os.WriteFile(filepath.Join(conf, "a.conf"), []byte("a=9\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check, err := LoadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	devs := checkFiles(check.Files, DefaultCheckSet(), false)
+	if len(devs) == 0 {
+		t.Fatal("expected a drift deviation after tampering the baseline")
+	}
+}
+
+func TestRecordObservedMerge(t *testing.T) {
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "manifest.json")
+	observed := filepath.Join(dir, "observed.json")
+	conf := filepath.Join(dir, "etc")
+	nginx := filepath.Join(conf, "nginx.conf")
+	writeTempFile(t, nginx, "user nginx;\n", time.Time{})
+
+	if err := os.WriteFile(observed, []byte("{\""+nginx+"\": {}}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := RecordObserved(manifest, observed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("expected 1 tracked file, got %d", n)
+	}
+	m, err := LoadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Files) != 1 || m.Files[0].Path != nginx {
+		t.Fatalf("unexpected tracked set: %+v", m.Files)
+	}
+	// The controller only enumerated the path; the node hashes the file, so the
+	// manifest carries the real hash and checks clean.
+	if m.Files[0].SHA256 == "" || m.Files[0].SHA256 == "abc123" {
+		t.Fatalf("expected the node-side hash, got %q", m.Files[0].SHA256)
+	}
+	if devs := checkFiles(m.Files, DefaultCheckSet(), false); len(devs) != 0 {
+		t.Fatalf("observed merge should check clean, got %v", devs)
+	}
+
+	// A path the node cannot read is not promised.
+	gone := filepath.Join(conf, "gone.conf")
+	writeTempFile(t, gone, "x\n", time.Time{})
+	obs2 := filepath.Join(dir, "observed2.json")
+	if err := os.WriteFile(obs2, []byte("{\""+gone+"\": {}, \""+nginx+"\": {}}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(gone); err != nil {
+		t.Fatal(err)
+	}
+	n2, err := RecordObserved(manifest, obs2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n2 != 1 {
+		t.Fatalf("missing node file must not be promised, tracked=%d", n2)
+	}
+}

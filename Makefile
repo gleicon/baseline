@@ -86,7 +86,7 @@ ANSIBLE_PYTHON   := $(shell \
 ANSIBLE_PLAYBOOK ?= $(if $(ANSIBLE_DIRECT),$(ANSIBLE_BIN),\
                     $(if $(and $(ANSIBLE_BIN),$(ANSIBLE_PYTHON)),$(ANSIBLE_PYTHON) $(ANSIBLE_BIN),))
 
-LINUX_BINARY := fiia-agent-linux-$(LINUX_GOARCH)
+LINUX_BINARY := baseline-agent-linux-$(LINUX_GOARCH)
 
 # ── dev setup ──────────────────────────────────────────────────────────────────
 # dev-init: one-shot first-time setup (detect backend, create VM, start it)
@@ -126,23 +126,23 @@ dev-build:
 # ── dev inventory ──────────────────────────────────────────────────────────────
 
 dev-inventory:
-	$(VM) ssh-config > /tmp/fiia-ssh.cfg
+	$(VM) ssh-config > /tmp/baseline-ssh.cfg
 	@mkdir -p deploy/ansible/inventory
 	@case "$(DEV_VM_BACKEND)" in \
 	  lima) \
-	    printf '[fleet]\n$(DEV_VM_NAME) ansible_ssh_common_args="-F /tmp/fiia-ssh.cfg"\n' \
+	    printf '[fleet]\n$(DEV_VM_NAME) ansible_ssh_common_args="-F /tmp/baseline-ssh.cfg"\n' \
 	      > deploy/ansible/inventory/dev.ini ;; \
 	  colima) \
-	    printf '[fleet]\ncolima-vm ansible_host=colima ansible_ssh_common_args="-F /tmp/fiia-ssh.cfg"\n' \
+	    printf '[fleet]\ncolima-vm ansible_host=colima ansible_ssh_common_args="-F /tmp/baseline-ssh.cfg"\n' \
 	      > deploy/ansible/inventory/dev.ini ;; \
 	  multipass) \
-	    printf '[fleet]\n$(DEV_VM_NAME) ansible_ssh_common_args="-F /tmp/fiia-ssh.cfg"\n' \
+	    printf '[fleet]\n$(DEV_VM_NAME) ansible_ssh_common_args="-F /tmp/baseline-ssh.cfg"\n' \
 	      > deploy/ansible/inventory/dev.ini ;; \
 	  local) \
 	    printf '[fleet]\nlocalhost ansible_connection=local\n' \
 	      > deploy/ansible/inventory/dev.ini ;; \
 	  *) \
-	    printf '[fleet]\n$(DEV_VM_NAME) ansible_ssh_common_args="-F /tmp/fiia-ssh.cfg"\n' \
+	    printf '[fleet]\n$(DEV_VM_NAME) ansible_ssh_common_args="-F /tmp/baseline-ssh.cfg"\n' \
 	      > deploy/ansible/inventory/dev.ini ;; \
 	esac
 	@echo "inventory written (backend: $(DEV_VM_BACKEND))"
@@ -157,32 +157,32 @@ dev-deploy: dev-build dev-inventory
 	ANSIBLE_COLLECTIONS_PATHS=$(CURDIR)/ansible/collections \
 	$(ANSIBLE_PLAYBOOK) \
 	  -i deploy/ansible/inventory/dev.ini \
-	  -e "fiia_agent_binary=$(CURDIR)/$(LINUX_BINARY)" \
+	  -e "baseline_agent_binary=$(CURDIR)/$(LINUX_BINARY)" \
 		  deploy/ansible/dev-bootstrap.yml
 
 # ── dev observe ────────────────────────────────────────────────────────────────
 
 dev-run:
-	$(VM) shell sudo systemctl status fiia-agent
+	$(VM) shell sudo systemctl status baseline-agent
 
 dev-logs:
-	$(VM) shell sudo tail -f /var/log/fiia/agent.log
+	$(VM) shell sudo tail -f /var/log/baseline/agent.log
 
 dev-journal:
-	$(VM) shell sudo journalctl -u fiia-agent -f
+	$(VM) shell sudo journalctl -u baseline-agent -f
 
 dev-watch:
-	$(VM) shell sudo journalctl -u fiia-agent -f
+	$(VM) shell sudo journalctl -u baseline-agent -f
 
 dev-stop:
-	$(VM) shell sudo systemctl stop fiia-agent
+	$(VM) shell sudo systemctl stop baseline-agent
 
 # ── drift detection test ───────────────────────────────────────────────────────
 
 dev-drift:
 	@echo "=== introducing drift ==="
 	$(VM) shell sudo sh -c \
-	  'printf "# UNAUTHORIZED EDIT\nversion: 99\nstate: compromised\n" > /etc/fiia/sentinel'
+	  'printf "# UNAUTHORIZED EDIT\nversion: 99\nstate: compromised\n" > /etc/baseline/sentinel'
 	$(VM) shell sudo sh -c \
 	  'echo "banner changed by attacker" > /etc/motd'
 	@echo ""
@@ -191,14 +191,14 @@ dev-drift:
 dev-restore:
 	@echo "=== restoring baseline ==="
 	$(VM) shell sudo sh -c \
-	  'printf "# managed by fiia baseline \342\200\224 do not edit\nversion: 1\nstate: ok\n" > /etc/fiia/sentinel'
+	  'printf "# managed by baseline \342\200\224 do not edit\nversion: 1\nstate: ok\n" > /etc/baseline/sentinel'
 	$(VM) shell sudo sh -c \
-	  'echo "Authorized access only. Activity is monitored by Fiia." > /etc/motd'
+	  'echo "Authorized access only. Activity is monitored by Baseline." > /etc/motd'
 	@echo "Baseline restored."
 
 dev-check-drift:
 	@echo "=== on-node verdict (exit 0 clean, 1 drift) ==="
-	$(VM) shell sudo /usr/local/bin/fiia-agent -check -manifest /etc/fiia/manifest.json; true
+	$(VM) shell sudo /usr/local/bin/baseline-agent -check -manifest /etc/baseline/manifest.json; true
 	@echo ""
 	@echo "=== recent agent log (OTel export target) ==="
-	$(VM) shell sudo tail -n 20 /var/log/fiia/agent.log
+	$(VM) shell sudo tail -n 20 /var/log/baseline/agent.log

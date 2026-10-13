@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gleicon/fiia/internal/agent/audit"
+	"github.com/gleicon/baseline/internal/agent/audit"
 )
 
 func TestSetupEmitShutdownStdout(t *testing.T) {

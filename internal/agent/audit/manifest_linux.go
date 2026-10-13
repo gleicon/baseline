@@ -4,7 +4,7 @@ package audit
 
 import (
 	"fmt"
-	"github.com/gleicon/fiia/internal/assert"
+	"github.com/gleicon/baseline/internal/assert"
 	"os/exec"
 	"strings"
 )
@@ -158,7 +158,7 @@ func mapSystemctlState(name, verb, realDeviation, out string, exitCode int) []st
 	case 4:
 		state := strings.TrimSpace(out)
 		return []string{fmt.Sprintf(
-			"svc:unverifiable:%s:systemctl reports %q for %s (D-Bus permission denied — grant the service user read access to the systemd manager, e.g. /etc/dbus-1/system.d/fiia-fleet.conf, or run as root)",
+			"svc:unverifiable:%s:systemctl reports %q for %s (D-Bus permission denied — grant the service user read access to the systemd manager, e.g. /etc/dbus-1/system.d/baseline-fleet.conf, or run as root)",
 			name, state, verb)}
 	default:
 		return []string{fmt.Sprintf("%s:%s", realDeviation, name)}

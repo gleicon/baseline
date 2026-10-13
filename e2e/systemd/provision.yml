@@ -1,5 +1,5 @@
 ---
-# Fiia E2E (systemd) stage 1 — provision the agent via the fiia.fleet.agent role
+# Baseline E2E (systemd) stage 1 — provision the agent via the baseline.fleet.agent role
 # inside a systemd-capable container, plus a tracked service for service drift.
 #
 # Exercises: role install (user, config, binary, systemd unit, logrotate),
@@ -8,35 +8,35 @@
 #
 # Run via: ./e2e/systemd/run.sh  (or: make e2e-systemd)
 
-- name: Fiia E2E — provision agent + tracked service (systemd)
+- name: Baseline E2E — provision agent + tracked service (systemd)
   hosts: all
 
   vars:
-    fiia_agent_binary: "{{ agent_binary }}"
-    fiia_heartbeat_interval_sec: 5
-    fiia_audit_interval_sec: 5
-    fiia_audit_jitter_max_sec: 1
-    fiia_manifest_snapshot: false
-    fiia_manifest_files:
-      - /etc/fiia/sentinel
+    baseline_agent_binary: "{{ agent_binary }}"
+    baseline_heartbeat_interval_sec: 5
+    baseline_audit_interval_sec: 5
+    baseline_audit_jitter_max_sec: 1
+    baseline_manifest_snapshot: false
+    baseline_manifest_files:
+      - /etc/baseline/sentinel
       - /etc/motd
-    fiia_manifest_services:
-      - fiia-test
+    baseline_manifest_services:
+      - baseline-test
     baseline_content: "{{ lookup('file', baseline_file) }}"
 
   tasks:
-    - name: Create fiia config directory
+    - name: Create baseline config directory
       ansible.builtin.file:
-        path: /etc/fiia
+        path: /etc/baseline
         state: directory
         mode: "0755"
 
     - name: Create the tracked test service
       ansible.builtin.copy:
-        dest: /etc/systemd/system/fiia-test.service
+        dest: /etc/systemd/system/baseline-test.service
         content: |
           [Unit]
-          Description=fiia e2e tracked service
+          Description=baseline e2e tracked service
           [Service]
           ExecStart=/bin/sleep infinity
           Restart=no
@@ -45,7 +45,7 @@
 
     - name: Enable and start the tracked test service
       ansible.builtin.systemd:
-        name: fiia-test.service
+        name: baseline-test.service
         enabled: true
         state: started
         daemon_reload: true
@@ -56,18 +56,18 @@
         dest: "{{ item.dest }}"
         mode: "0644"
       loop:
-        - dest: /etc/fiia/sentinel
+        - dest: /etc/baseline/sentinel
           content: "{{ baseline_content }}"
         - dest: /etc/motd
-          content: "Authorized access only. Activity is monitored by Fiia.\n"
+          content: "Authorized access only. Activity is monitored by Baseline.\n"
 
-    - name: Apply the fiia agent role
+    - name: Apply the baseline agent role
       ansible.builtin.include_role:
-        name: fiia.fleet.agent
+        name: baseline.fleet.agent
 
-    - name: Read fiia-agent service state
+    - name: Read baseline-agent service state
       ansible.builtin.systemd:
-        name: fiia-agent
+        name: baseline-agent
       register: agent_svc
 
     - name: Assert active (Type=notify => sd_notify READY was accepted) + enabled
@@ -76,11 +76,11 @@
           - agent_svc.status.ActiveState == "active"
           - agent_svc.status.SubState == "running"
           - agent_svc.status.UnitFileState == "enabled"
-        fail_msg: "fiia-agent not active/enabled: {{ agent_svc.status }}"
+        fail_msg: "baseline-agent not active/enabled: {{ agent_svc.status }}"
 
     - name: Capture watchdog configuration
       ansible.builtin.command:
-        argv: ["systemctl", "show", "-p", "WatchdogUSec", "--value", "fiia-agent"]
+        argv: ["systemctl", "show", "-p", "WatchdogUSec", "--value", "baseline-agent"]
       register: watchdog
       changed_when: false
 
@@ -94,10 +94,10 @@
       ansible.builtin.stat:
         path: "{{ item }}"
       loop:
-        - /etc/systemd/system/fiia-agent.service
-        - /etc/logrotate.d/fiia
-        - /etc/fiia/agent.toml
-        - /etc/fiia/manifest.json
+        - /etc/systemd/system/baseline-agent.service
+        - /etc/logrotate.d/baseline
+        - /etc/baseline/agent.toml
+        - /etc/baseline/manifest.json
       register: artifacts
 
     - name: Assert unit, logrotate, config, and manifest exist

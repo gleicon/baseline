@@ -1,4 +1,4 @@
-module github.com/gleicon/fiia
+module github.com/gleicon/baseline
 
 go 1.26.0
 

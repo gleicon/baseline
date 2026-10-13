@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	agentcfg "github.com/gleicon/fiia/internal/agent/config"
-	"github.com/gleicon/fiia/internal/assert"
+	agentcfg "github.com/gleicon/baseline/internal/agent/config"
+	"github.com/gleicon/baseline/internal/assert"
 )
 
 // Check status values emitted for every manifest verification.
@@ -148,6 +148,13 @@ type ManifestService struct {
 	Enabled bool   `json:"enabled"`
 }
 
+// ManifestSetting is one runtime key/value pair promised at provisioning.
+// Key uses the form "sysctl:<name>" for a live kernel parameter.
+type ManifestSetting struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
 // Manifest is the desired-state document written by the ansible module and read by the agent.
 type Manifest struct {
 	SchemaVersion   int               `json:"schema_version"`
@@ -155,6 +162,8 @@ type Manifest struct {
 	Files           []ManifestFile    `json:"files"`
 	Packages        []ManifestPackage `json:"packages"`
 	Services        []ManifestService `json:"services"`
+	Settings        []ManifestSetting `json:"settings,omitempty"`
+	SysctlSnapshot  map[string]string `json:"sysctl_snapshot,omitempty"`  // all sysctl keys at provision time (sysctl:all)
 	PackageSnapshot []string          `json:"package_snapshot,omitempty"` // all packages at provision time (mode: snapshot)
 	ServiceSnapshot []string          `json:"service_snapshot,omitempty"` // all active services at provision time (mode: snapshot)
 }
@@ -196,6 +205,8 @@ func RunManifest(cfg *agentcfg.AgentConfig) (CheckResult, bool) {
 	deviations = append(deviations, checkFiles(m.Files, checks, cfg.FastScan)...)
 	deviations = append(deviations, checkPackages(m.Packages)...)
 	deviations = append(deviations, checkServices(m.Services)...)
+	deviations = append(deviations, checkSettings(m.Settings, querySettingValue)...)
+	deviations = append(deviations, checkSysctlSnapshot(m.SysctlSnapshot)...)
 	deviations = append(deviations, checkUnauthorizedPackages(m.PackageSnapshot)...)
 	deviations = append(deviations, checkUnauthorizedServices(m.ServiceSnapshot)...)
 
@@ -349,6 +360,25 @@ func checkEnabled(checks []string, name string) bool {
 		}
 	}
 	return false
+}
+
+// checkSettings compares live runtime values against the promised settings.
+// A query returns the trimmed live value ("" with an error if unqueryable);
+// mismatches are reported as setting:mismatch:<key>:<have>:<want>, and an
+// unavailable key as setting:unavailable:<key>.
+func checkSettings(settings []ManifestSetting, query func(name string) (string, error)) []string {
+	var deviations []string
+	for _, s := range settings {
+		have, err := query(s.Key)
+		if err != nil {
+			deviations = append(deviations, fmt.Sprintf("setting:unavailable:%s", s.Key))
+			continue
+		}
+		if have != strings.TrimSpace(s.Value) {
+			deviations = append(deviations, fmt.Sprintf("setting:mismatch:%s:%s:%s", s.Key, have, s.Value))
+		}
+	}
+	return deviations
 }
 
 func sha256File(path string) (string, error) {

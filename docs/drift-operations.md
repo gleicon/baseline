@@ -1,4 +1,4 @@
-# Fiia drift operations
+# Baseline drift operations
 
 Find out what drifted, fix it, and verify the fix, for one node or a fleet.
 
@@ -8,39 +8,39 @@ explicit opt-in (`-remediate` / `remediate = true`), never the default.
 
 ## Golden rule
 
-Fiia checks only what the manifest documents. Packages and services are
+Baseline checks only what the manifest documents. Packages and services are
 snapshotted automatically (anything extra flags as `pkg:unauthorized` /
 `svc:unauthorized`). Files are never snapshotted: document each file you want
 checked in Ansible (a `copy:`/`template:`/`lineinfile:` task, derived by
 `-scan-playbook`) or directly in the manifest (`-write-manifest -files ...`,
-or the role's `fiia_manifest_files`). If it matters, promise it.
+or the role's `baseline_manifest_files`). If it matters, promise it.
 
 ## Find what drifted
 
-The detail lives in the `fiia.drift.details` metric, which the agent emits only
+The detail lives in the `baseline.drift.details` metric, which the agent emits only
 while drifting, with the deviation list as the `deviations` label.
 
 | Where | What you see |
 |-------|--------------|
-| Grafana dashboard *Fiia, drift detection* | *Drifted nodes (host, deviations)* table, per drifted node |
-| Prometheus query | `fiia_drift_details` and `fiia_drift_status`, `ALERTS` |
+| Grafana dashboard *Baseline, drift detection* | *Drifted nodes (host, deviations)* table, per drifted node |
+| Prometheus query | `baseline_drift_details` and `baseline_drift_status`, `ALERTS` |
 
 Fleet queries:
 
 ```promql
 # every drifted node and what is wrong with it
-fiia_drift_details
+baseline_drift_details
 # nodes with vim drift, without logging in
-fiia_drift_details{deviations=~".*vim.*"}
+baseline_drift_details{deviations=~".*vim.*"}
 # count of drifted nodes
-count(fiia_drift_details)
+count(baseline_drift_details)
 ```
 
 Per node, from the shell:
 
 ```sh
-fiia-agent -check -manifest /etc/fiia/manifest.json
-fiia-agent -check -format json -manifest /etc/fiia/manifest.json
+baseline-agent -check -manifest /etc/baseline/manifest.json
+baseline-agent -check -format json -manifest /etc/baseline/manifest.json
 ```
 
 ## Deviation legend
@@ -59,6 +59,8 @@ fiia-agent -check -format json -manifest /etc/fiia/manifest.json
 | `svc:inactive:<name>` / `svc:disabled:<name>` | declared service stopped / not enabled |
 | `svc:unauthorized:<name>` | running service not in the snapshot |
 | `svc:unverifiable:<name>` | systemd cannot be queried (D-Bus denied); grant access or run as root |
+| `setting:mismatch:<key>:<have>:<want>` | live runtime value differs from the record (track via `-settings sysctl:<name>`) |
+| `setting:unavailable:<key>` | runtime key cannot be queried |
 
 ## Fix
 
@@ -85,7 +87,7 @@ systemctl start --now nginx && systemctl enable nginx        # or stop/disable
 
 > Warning: `-remediate` / `remediate = true` enforces only the packages and
 > services recorded in the manifest snapshot. The manifest is not a complete
-> system-state model. Fiia does not know about and will not touch users,
+> system-state model. Baseline does not know about and will not touch users,
 > sudoers, SSH keys, cron jobs, firewall rules, sysctl parameters, or any other
 > state Ansible manages. Re-running the provisioning playbook is the only
 > complete remediation. Treat `-remediate` as a package/service tidy-up, never
@@ -94,7 +96,7 @@ systemctl start --now nginx && systemctl enable nginx        # or stop/disable
 ```sh
 # removes packages/services not in the snapshot, fixes declared service states.
 # File deviations are still reported; only the playbook can restore content.
-fiia-agent -check -remediate -manifest /etc/fiia/manifest.json
+baseline-agent -check -remediate -manifest /etc/baseline/manifest.json
 ```
 
 Daemon-mode enforcement on every audit:
@@ -109,7 +111,7 @@ remediate = true   # off by default; deliberate opt-in
 - The manifest is the promise snapshot. It records files, packages, services,
   and (in snapshot mode) the full package and service lists. The agent does not
   alter it.
-- The provisioning playbook is the source of truth for file content. Fiia
+- The provisioning playbook is the source of truth for file content. Baseline
   remediates packages and services but never rewrites files, because it has no
   content to write and IaS is where file content lives.
 - Keep promises fresh. A stale manifest is a stale promise; re-baseline with a
@@ -122,10 +124,10 @@ Example promise flow:
 # operator installed vim on a node by hand
 # 1. alert fires; Grafana *Drifted nodes* shows pkg:unauthorized:vim (+ deps)
 # 2. decide: vim was a mistake
-fiia-agent -check -remediate -manifest /etc/fiia/manifest.json
+baseline-agent -check -remediate -manifest /etc/baseline/manifest.json
 #    remediate: removed 2 package(s): vim, vim-common
 # 3. verify
-fiia-agent -check -manifest /etc/fiia/manifest.json      # OK: no drift
+baseline-agent -check -manifest /etc/baseline/manifest.json      # OK: no drift
 # alert auto-resolves, status 0, history kept
 ```
 

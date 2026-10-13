@@ -1,0 +1,32 @@
+---
+baseline_install_dir: /usr/local/bin
+baseline_config_dir: /etc/baseline
+baseline_log_dir: /var/log/baseline
+baseline_user: baseline
+
+baseline_heartbeat_interval_sec: 60
+baseline_audit_interval_sec: 1200
+baseline_audit_jitter_max_sec: 120
+
+# otlp_endpoint: OTLP/HTTP receiver for drift verdicts and liveness.
+# Empty means stdout export (no collector needed).
+# baseline_otlp_endpoint: "http://otelcol.example.com:4318"
+
+baseline_manifest_path: "{{ baseline_config_dir }}/manifest.json"
+
+# baseline_manage_manifest: record the drift manifest as the last step (via the
+# agent binary: baseline-agent -write-manifest). Disable when the manifest is
+# managed by your own tasks.
+baseline_manage_manifest: true
+baseline_manifest_snapshot: false
+# The manifest records what the agent checks. Lists of strings; packages may be
+# "name" or "name=version", services are names.
+baseline_manifest_files: []
+baseline_manifest_packages: []
+baseline_manifest_services: []
+
+# baseline_agent_binary: local path to a pre-staged baseline-agent binary (copied).
+#   Required unless baseline_release_base is set.
+baseline_release_base: ""   # download prefix; appends /baseline-agent-linux-<arch>.
+                        # e.g. https://github.com/gleicon/baseline/releases/latest/download
+# baseline_agent_binary: /path/to/baseline-agent

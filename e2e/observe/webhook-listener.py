@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Tiny webhook receiver for the Fiia live E2E: prints and appends any Grafana
-alert notification POST to /tmp/fiia-webhook.log. Lets you SEE the notification
+"""Tiny webhook receiver for the Baseline live E2E: prints and appends any Grafana
+alert notification POST to /tmp/baseline-webhook.log. Lets you SEE the notification
 land when the drift alert fires.
 
 Run with: bash e2e/observe/run-webhook.sh   (Ctrl+C to stop)
@@ -9,7 +9,7 @@ import http.server
 import json
 import sys
 
-LOG = "/tmp/fiia-webhook.log"
+LOG = "/tmp/baseline-webhook.log"
 
 
 class Handler(http.server.BaseHTTPRequestHandler):

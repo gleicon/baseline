@@ -1,8 +1,8 @@
-# Fiia OTel, Prometheus, Grafana
+# Baseline OTel, Prometheus, Grafana
 
 The live-observability test shipped with the repo (`make e2e-live`) and the
 configuration you can copy to build your own monitoring environment for real
-Fiia agents.
+Baseline agents.
 
 ## How it fits
 
@@ -12,7 +12,7 @@ rules. Grafana renders a dashboard and fires its own alerts. Everything runs in
 Docker (Compose) with nothing installed on your host.
 
 ```
-fiia-agent -> otel-collector (prometheus exporter :9464) -> Prometheus (:9090)
+baseline-agent -> otel-collector (prometheus exporter :9464) -> Prometheus (:9090)
      |                              |                            |
      |                              + git debug + file (telemetry.json)
      |                                                          + alert rules
@@ -37,16 +37,16 @@ bash e2e/observe/run-webhook.sh   # optional: print alert notifications as they 
 
 ## What you see
 
-Dashboard *Fiia, drift detection*: a drift status stat, an alive stat,
+Dashboard *Baseline, drift detection*: a drift status stat, an alive stat,
 timeseries for drift/checks/alive, and two tables, *Firing alerts* and *Drifted
 nodes* (each drifted node plus its deviations).
 
 Alerts in Prometheus (http://localhost:9090/alerts) and Grafana Alerting
 (http://localhost:3000/alerting):
 
-- `FiiaDriftDetected`: `fiia_drift_status == 1` for 15s
-- `FiiaCheckError`: `fiia_drift_status == 2` for 15s
-- `FiiaNodeSilent`: `absent(fiia_alive)` for 30s
+- `BaselineDriftDetected`: `baseline_drift_status == 1` for 15s
+- `BaselineCheckError`: `baseline_drift_status == 2` for 15s
+- `BaselineNodeSilent`: `absent(baseline_alive)` for 30s
 
 When an alert fires, Grafana POSTs the alert payload to the webhook in
 `contactpoints.yml`. Run the local listener to print it.
@@ -57,7 +57,7 @@ When an alert fires, Grafana POSTs the alert payload to the webhook in
 
 OTLP/HTTP receiver on `:4318`, a `prometheus` exporter on `:9464` (what
 Prometheus scrapes; `add_metric_suffixes: false` keeps names like
-`fiia_drift_status`), and `debug` + `file` exporters for
+`baseline_drift_status`), and `debug` + `file` exporters for
 `e2e/out/telemetry.json`. Pipelines: `metrics` to `[debug, file, prometheus]`,
 `logs` to `[debug, file]`.
 
@@ -72,33 +72,33 @@ Loaded by Grafana at startup; restart Grafana to re-read.
 
 - `datasources/datasources.yml`: a Prometheus datasource with `uid: prometheus`
   (rules and dashboard reference it by UID).
-- `dashboards/dashboards.yml` + `fiia.json`: a folder provider that auto-loads
+- `dashboards/dashboards.yml` + `baseline.json`: a folder provider that auto-loads
   the dashboard.
 - `alerting/alertrules.yml`: Grafana Unified Alerting rules mirroring the
   Prometheus rules. Each rule is query, reduce (last), threshold (gt 0). All
   three use `noDataState: OK`, because an empty query result is normal (the
-  drift query returns nothing when clean, `absent(fiia_alive)` returns nothing
+  drift query returns nothing when clean, `absent(baseline_alive)` returns nothing
   while the agent is alive). The group `interval` must divide evenly by the
   alert scheduler tick (10s).
 - `alerting/contactpoints.yml`: a `webhook` contact point, by default
-  `http://host.docker.internal:9999/fiia-alert`. Change the URL to
+  `http://host.docker.internal:9999/baseline-alert`. Change the URL to
   Slack/Teams/email in production.
 - `alerting/policies.yml`: routes every alert to that contact point.
 
 ### `e2e/observe/run-webhook.sh`
 
 A tiny HTTP receiver that prints Grafana alert notifications and appends them
-to `/tmp/fiia-webhook.log`.
+to `/tmp/baseline-webhook.log`.
 
 ## Where the deviations live
 
-`fiia.drift.status` is a number (0/1/2). The deviations arrive two ways:
+`baseline.drift.status` is a number (0/1/2). The deviations arrive two ways:
 
-- the `fiia.drift.details` metric, a gauge emitted while drifting with the
+- the `baseline.drift.details` metric, a gauge emitted while drifting with the
   deviation list as the `deviations` label (queryable, shown in the *Drifted
   nodes* panel);
-- the log record per check (`fiia.status`, `fiia.deviations[]`,
-  `fiia.manifest_generated_at`) through the logs pipeline to the `debug` and
+- the log record per check (`baseline.status`, `baseline.deviations[]`,
+  `baseline.manifest_generated_at`) through the logs pipeline to the `debug` and
   `file` exporters.
 
 ## Build your own environment
@@ -112,7 +112,7 @@ to `/tmp/fiia-webhook.log`.
    - `datasources.yml`: `url: http://prometheus:9090` to your Prometheus.
    - `contactpoints.yml`: replace the webhook URL with your notification
      target. Add SMTP to `grafana.ini` for email.
-   - `dashboards/fiia.json`: labels use `host_name` (the agent's `host.name`).
+   - `dashboards/baseline.json`: labels use `host_name` (the agent's `host.name`).
 4. Secure it: enable Grafana auth and change the admin password, put Prometheus
    behind auth or TLS, and use OTLP headers/TLS on the agent if the collector
    requires them.

@@ -15,9 +15,9 @@ func TestMapSystemctlState(t *testing.T) {
 		wantContains string
 	}{
 		{name: "active exit 0 confirms running", exitCode: 0, wantNil: true},
-		{name: "inactive exit 3 is a real deviation", exitCode: 3, wantContains: "svc:inactive:fiia-test"},
-		{name: "disabled exit 1 is a real deviation", exitCode: 1, wantContains: "svc:disabled:fiia-test"},
-		{name: "no-such-unit exit 4 is unverifiable (permission)", exitCode: 4, wantContains: "svc:unverifiable:fiia-test"},
+		{name: "inactive exit 3 is a real deviation", exitCode: 3, wantContains: "svc:inactive:baseline-test"},
+		{name: "disabled exit 1 is a real deviation", exitCode: 1, wantContains: "svc:disabled:baseline-test"},
+		{name: "no-such-unit exit 4 is unverifiable (permission)", exitCode: 4, wantContains: "svc:unverifiable:baseline-test"},
 	}
 
 	for _, tc := range cases {
@@ -28,7 +28,7 @@ func TestMapSystemctlState(t *testing.T) {
 				verb = "is-enabled"
 				realDeviation = "svc:disabled"
 			}
-			got := mapSystemctlState("fiia-test", verb, realDeviation, "inactive", tc.exitCode)
+			got := mapSystemctlState("baseline-test", verb, realDeviation, "inactive", tc.exitCode)
 			if tc.wantNil {
 				if len(got) != 0 {
 					t.Fatalf("expected no deviations, got %v", got)

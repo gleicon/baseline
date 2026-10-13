@@ -1,4 +1,4 @@
-# Fiia E2E (systemd): a systemd-capable target so the agent role's systemd
+# Baseline E2E (systemd): a systemd-capable target so the agent role's systemd
 # unit, sd_notify readiness, watchdog, and service-state drift can be exercised
 # for real. Multi-arch (unlike jrei/systemd-ubuntu, which is amd64-only) —
 # builds natively on arm64 Colima and x86_64 CI.
