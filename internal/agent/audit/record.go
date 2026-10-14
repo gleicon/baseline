@@ -148,6 +148,25 @@ func (a FileAttrs) toManifestFile(path string) ManifestFile {
 	}
 }
 
+// loadForMerge opens the manifest at path for a record pass: an existing
+// manifest is extended, a missing or unreadable one starts fresh at schema 1.
+// Returns the manifest with its timestamp advanced and its file list indexed
+// by path, ready for the caller to add to. extra sizes the index for the
+// entries about to land in it.
+func loadForMerge(manifestPath string, extra int) (Manifest, map[string]ManifestFile) {
+	m := Manifest{SchemaVersion: 1}
+	if existing, err := loadManifest(manifestPath); err == nil {
+		m = existing
+	}
+	m.GeneratedAt = time.Now().Unix()
+
+	byPath := make(map[string]ManifestFile, len(m.Files)+extra)
+	for _, f := range m.Files {
+		byPath[f.Path] = f
+	}
+	return m, byPath
+}
+
 // RecordBegin saves a pre-run index. Returns the number of files indexed.
 func RecordBegin(indexPath string, roots []string) (int, error) {
 	idx, err := BuildFileIndex(roots)
@@ -174,16 +193,7 @@ func RecordEnd(manifestPath, indexPath string, roots []string) (added, removed i
 		return 0, 0, err
 	}
 
-	m := Manifest{SchemaVersion: 1}
-	if existing, lerr := loadManifest(manifestPath); lerr == nil {
-		m = existing
-	}
-	m.GeneratedAt = time.Now().Unix()
-
-	byPath := make(map[string]ManifestFile, len(m.Files))
-	for _, f := range m.Files {
-		byPath[f.Path] = f
-	}
+	m, byPath := loadForMerge(manifestPath, 0)
 	for _, path := range DiffIndexes(pre, post) {
 		if attrs, ok := post[path]; ok {
 			byPath[path] = attrs.toManifestFile(path)
@@ -208,16 +218,7 @@ func RecordSnapshot(manifestPath string, roots []string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	m := Manifest{SchemaVersion: 1}
-	if existing, lerr := loadManifest(manifestPath); lerr == nil {
-		m = existing
-	}
-	m.GeneratedAt = time.Now().Unix()
-
-	byPath := make(map[string]ManifestFile, len(m.Files)+len(idx))
-	for _, f := range m.Files {
-		byPath[f.Path] = f
-	}
+	m, byPath := loadForMerge(manifestPath, len(idx))
 	for path, attrs := range idx {
 		byPath[path] = attrs.toManifestFile(path)
 	}
@@ -249,16 +250,7 @@ func RecordObserved(manifestPath, observedPath string) (int, error) {
 		return 0, fmt.Errorf("parse observed %q: %w", observedPath, err)
 	}
 
-	m := Manifest{SchemaVersion: 1}
-	if existing, lerr := loadManifest(manifestPath); lerr == nil {
-		m = existing
-	}
-	m.GeneratedAt = time.Now().Unix()
-
-	byPath := make(map[string]ManifestFile, len(m.Files)+len(observed))
-	for _, f := range m.Files {
-		byPath[f.Path] = f
-	}
+	m, byPath := loadForMerge(manifestPath, len(observed))
 	for path := range observed {
 		nf, herr := hashPath(path)
 		if herr != nil {

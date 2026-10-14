@@ -478,7 +478,7 @@ func runCheck(config_path, manifest_flag, format_flag, node_flag, otlp_flag stri
 	}
 
 	emitOTel(result, endpoint, node_id)
-	printResult(result, manifest_path, format_flag)
+	printResult(result, format_flag)
 
 	switch result.Status {
 	case audit.StatusOK:
@@ -490,10 +490,11 @@ func runCheck(config_path, manifest_flag, format_flag, node_flag, otlp_flag stri
 	}
 }
 
-// runRemediation enforces the manifest (explicitly authorized). Packages and
-// services are corrected by the agent; file deviations are reported as needing
-// the provisioning playbook (IaS restores file content). Returns the re-checked
-// result after the enforcement pass.
+// runRemediation reports an explicitly authorized enforcement pass: the scope
+// warning, what changed, and what the operator still has to fix themselves.
+// The enforcement itself lives in the audit package; this is presentation.
+// Returns the post-enforcement verdict, or the pre-enforcement one if the pass
+// could not run.
 func runRemediation(manifest_path, node_id string, before audit.CheckResult) audit.CheckResult {
 	// Big scope warning: remediation only enforces what the manifest snapshot
 	// records (packages + services). Config-management state that the manifest
@@ -503,28 +504,24 @@ func runRemediation(manifest_path, node_id string, before audit.CheckResult) aud
 	fmt.Println("         It does NOT restore users, cron, firewall, sysctl, or any other state that")
 	fmt.Println("         Ansible/IaC manages — re-running the provisioning playbook is the complete fix.")
 
-	m, err := audit.LoadFile(manifest_path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "agent: remediate: load manifest: %v\n", err)
-		return before
-	}
-	rem := audit.Remediate(m)
+	after, rem, err := audit.RemediateLocal(manifest_path, node_id)
 	if !rem.Empty() {
 		fmt.Printf("remediate: %s\n", rem.String())
 	}
-	if after, ok := audit.CheckLocal(manifest_path, node_id); ok {
-		if after.Status == audit.StatusOK {
-			fmt.Println("remediate: manifest now satisfied")
-		}
-		for _, d := range after.Deviations {
-			if strings.HasPrefix(d, "file:") {
-				fmt.Println("remediate: file deviations remain — restore file content by re-running the provisioning playbook (IaS)")
-				break
-			}
-		}
-		return after
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent: remediate: %v\n", err)
+		return before
 	}
-	return before
+	if after.Status == audit.StatusOK {
+		fmt.Println("remediate: manifest now satisfied")
+	}
+	for _, d := range after.Deviations {
+		if strings.HasPrefix(d, "file:") {
+			fmt.Println("remediate: file deviations remain — restore file content by re-running the provisioning playbook (IaS)")
+			break
+		}
+	}
+	return after
 }
 
 // emitOTel sends one check verdict to the OTel pipeline. Failures are logged
@@ -544,23 +541,16 @@ func emitOTel(result audit.CheckResult, endpoint, node_id string) {
 	}
 }
 
-func printResult(result audit.CheckResult, manifest_path, format_flag string) {
+func printResult(result audit.CheckResult, format_flag string) {
 	if format_flag == "json" {
 		view := map[string]any{
-			"node_id":   result.NodeID,
-			"status":    result.Status,
-			"timestamp": result.TimestampUnix,
-			"deviations": func() []string {
-				if result.Deviations == nil {
-					return []string{}
-				}
-				return result.Deviations
-			}(),
-		}
-		if manifest, err := audit.LoadFile(manifest_path); err == nil {
-			view["files_checked"] = len(manifest.Files)
-			view["packages_checked"] = len(manifest.Packages)
-			view["services_checked"] = len(manifest.Services)
+			"node_id":          result.NodeID,
+			"status":           result.Status,
+			"timestamp":        result.TimestampUnix,
+			"deviations":       result.Deviations,
+			"files_checked":    result.FilesChecked,
+			"packages_checked": result.PackagesChecked,
+			"services_checked": result.ServicesChecked,
 		}
 		out, err := json.MarshalIndent(view, "", "  ")
 		if err != nil {
@@ -573,12 +563,8 @@ func printResult(result audit.CheckResult, manifest_path, format_flag string) {
 
 	switch result.Status {
 	case audit.StatusOK:
-		if manifest, err := audit.LoadFile(manifest_path); err == nil {
-			fmt.Printf("OK: no drift (files=%d packages=%d services=%d)\n",
-				len(manifest.Files), len(manifest.Packages), len(manifest.Services))
-		} else {
-			fmt.Println("OK: no drift")
-		}
+		fmt.Printf("OK: no drift (files=%d packages=%d services=%d)\n",
+			result.FilesChecked, result.PackagesChecked, result.ServicesChecked)
 	case audit.StatusDriftDetected:
 		fmt.Printf("DRIFT: %d deviation(s)\n", len(result.Deviations))
 		printDeviations(result.Deviations)

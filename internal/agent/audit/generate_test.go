@@ -42,7 +42,7 @@ func TestGenerateManifestRoundTrip(t *testing.T) {
 		t.Errorf("warnings: got %v, want 1 missing-file warning", warnings)
 	}
 
-	m, err := LoadFile(dest)
+	m, err := loadManifest(dest)
 	if err != nil {
 		t.Fatalf("load generated: %v", err)
 	}

@@ -53,13 +53,22 @@ both are discarded, and the name is appended to `rem.ServicesStopped` regardless
 On a `static` or masked unit the stop succeeds, the disable fails, and the
 operator reads "stopped 1 service(s)" for a service that returns at next boot.
 
-**Decision:** Append to `ServicesStopped` only when `stopService` returns nil,
-matching the declared-services branch directly below it.
+**Decision:** Report only state changes that demonstrably took effect.
 
-**Rationale:** One fidelity rule for the whole function. A still-failing disable
-re-flags as `svc:unauthorized` on the next check, so the deviation is not lost —
-which is why an explicit `Failed` field on `Remediation` was not worth widening
-the struct and the output format for.
+**Rationale:** One fidelity rule for the whole function. A change that did not
+take effect re-flags as a deviation on the next check, so nothing is lost — which
+is why an explicit `Failed` field on `Remediation` was not worth widening the
+struct and the output format for.
+
+> **Correction (first implementation was wrong).** The original fix changed only
+> the unauthorized-services branch, and its comment claimed this matched "the
+> declared branch below". That was false: of the four declared blocks, only
+> `startService` and `enableService` checked their error — the stop and disable
+> blocks appended unconditionally, as did `disableService` in the branch that was
+> edited. The inconsistency the decision set out to remove survived in three of
+> four places, and commit `c0139ba` and this entry both overstated what landed.
+> `/ds-code-quality-review` caught it. The real fix replaced all four blocks with
+> one `reconcile` helper, so the error check exists once and cannot drift again.
 
 ## 4. The Golden rule has two homes, not one or four
 
@@ -250,3 +259,50 @@ Consequences of the above, recorded so they are not lost.
   the "node inventory" definition out of the `## Principle` paragraph.
 - `docs/otel-prometheus-grafana.md`: redraw or replace the ASCII diagram at
   `:14-21` (stray "git", arms do not align with their sources).
+
+---
+
+# Follow-up: code-quality review
+
+`/ds-code-quality-review` audited the v0.4.0 commit and found that decision 3 was
+two-thirds unapplied (corrected in place above). It also found three structural
+problems, all fixed:
+
+## 11. One reconciliation path for systemd state
+
+`remediateServices` hand-rolled query → compare → act → report four times, over
+two axes (active/enabled × wanted/unwanted), with the mutations going through
+helpers while the queries were inline `exec.Command`. That asymmetry is what let
+the error checks drift apart. Replaced by `serviceIs` + `reconcile`: 26 lines
+become 8, the error check exists once, and unauthorized services that get
+disabled are now reported (previously `disableService` ran and was never
+recorded).
+
+## 12. The verdict carries its own scope
+
+A single `-check -remediate` run parsed the manifest four times: once for the
+check, once to load it for remediation, once to re-check, and once more purely to
+count files/packages/services for the output line. `CheckResult` now carries
+`FilesChecked` / `PackagesChecked` / `ServicesChecked`, filled where the manifest
+is already in hand, and `CheckManifest` exposes the check over an
+already-loaded manifest. Down to two parses with `-remediate` (the initial
+verdict and the post-enforcement verdict, each meaning something different) and
+one without. Two dead `if err == nil` fallbacks in `printResult` went with it,
+along with its `manifest_path` parameter.
+
+`Deviations` is now always a slice rather than sometimes nil, which removed an
+inline anonymous function from the middle of the JSON view literal.
+
+## 13. Remediation moved back into the audit layer
+
+Decision 1 deleted `audit.RemediatePath` as dead code, but its caller had moved
+into `cmd/agent`, where `runRemediation` hand-rolled load + remediate + re-check.
+That was a layer leak introduced by the fix, not dead code. Replaced by
+`audit.RemediateLocal(path, nodeID) (CheckResult, Remediation, error)`;
+`runRemediation` is now presentation only. `audit.LoadFile` — an identity wrapper
+whose `assert` duplicated the one inside `loadManifest` — is deleted, with its
+seven test callers pointed at `loadManifest` directly.
+
+Also folded in: `record.go` repeated the same nine-line "extend the existing
+manifest or start fresh" preamble in `RecordEnd`, `RecordSnapshot` and
+`RecordObserved`; it is now `loadForMerge`.

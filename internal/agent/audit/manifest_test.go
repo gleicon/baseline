@@ -81,6 +81,15 @@ func TestRunManifestCleanFile(t *testing.T) {
 	if len(p.Deviations) != 0 {
 		t.Errorf("no deviations expected, got %v", p.Deviations)
 	}
+	// Deviations is always a slice so callers never branch on nil, and the
+	// promised scope rides on the result so nothing re-reads the manifest.
+	if p.Deviations == nil {
+		t.Error("Deviations must be an empty slice, not nil")
+	}
+	if p.FilesChecked != 1 || p.PackagesChecked != 0 || p.ServicesChecked != 0 {
+		t.Errorf("checked counts: got files=%d packages=%d services=%d, want 1/0/0",
+			p.FilesChecked, p.PackagesChecked, p.ServicesChecked)
+	}
 }
 
 func TestRunManifestMissingFile(t *testing.T) {

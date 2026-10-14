@@ -64,17 +64,29 @@ func TestCheckLocalMissingManifest(t *testing.T) {
 	}
 }
 
-func TestLoadFileRoundTrip(t *testing.T) {
+func TestLoadManifestRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	mpath := writeTestManifest(t, dir, Manifest{SchemaVersion: 1, GeneratedAt: 42})
-	m, err := LoadFile(mpath)
+	m, err := loadManifest(mpath)
 	if err != nil {
-		t.Fatalf("LoadFile: %v", err)
+		t.Fatalf("loadManifest: %v", err)
 	}
 	if m.GeneratedAt != 42 {
 		t.Errorf("generated_at: got %d, want 42", m.GeneratedAt)
 	}
-	if _, err := LoadFile(filepath.Join(dir, "missing.json")); err == nil {
-		t.Error("LoadFile missing: want error, got nil")
+	if _, err := loadManifest(filepath.Join(dir, "missing.json")); err == nil {
+		t.Error("loadManifest missing: want error, got nil")
+	}
+}
+
+// RemediateLocal must surface a missing manifest as an error rather than
+// reporting an empty remediation as success.
+func TestRemediateLocalMissingManifest(t *testing.T) {
+	_, rem, err := RemediateLocal(filepath.Join(t.TempDir(), "missing.json"), "node-1")
+	if err == nil {
+		t.Fatal("want an error for a missing manifest, got nil")
+	}
+	if !rem.Empty() {
+		t.Fatalf("nothing can be remediated from a manifest that will not load, got %+v", rem)
 	}
 }

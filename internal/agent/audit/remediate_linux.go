@@ -77,6 +77,28 @@ func remediatePackages(snapshot []string) []string {
 	return removed
 }
 
+// serviceIs reports whether systemd answers yes to a --quiet query
+// ("is-active", "is-enabled"). A query that cannot run reads as "no".
+func serviceIs(name, query string) bool {
+	return exec.Command("systemctl", "--system", query, "--quiet", name).Run() == nil
+}
+
+// reconcile brings one systemd property of a service to want, and reports
+// whether it actually changed. The error return of the fix-up command is the
+// only evidence that the change took effect: under a restricted unit (no
+// privileges) or on a static/masked unit these commands fail, and a failure
+// must never be reported as a remediation. A property that resists the change
+// keeps flagging as a deviation on the next check, so nothing is lost.
+func reconcile(name, query string, want bool, on, off func(string) error) bool {
+	switch is := serviceIs(name, query); {
+	case want && !is:
+		return on(name) == nil
+	case !want && is:
+		return off(name) == nil
+	}
+	return false
+}
+
 // remediateServices stops/disables services not in the service snapshot and
 // brings declared services back to their recorded running/enabled state.
 func remediateServices(rem *Remediation, serviceSnapshot []string, declared []ManifestService) {
@@ -84,39 +106,28 @@ func remediateServices(rem *Remediation, serviceSnapshot []string, declared []Ma
 		current, err := listActiveServices()
 		if err == nil {
 			for _, s := range unauthorizedSet(serviceSnapshot, current) {
-				// Report only what demonstrably stopped, matching the declared
-				// branch below. A service that resists the stop keeps flagging
-				// as svc:unauthorized on the next check, so nothing is lost.
-				if stopService(s) == nil {
+				if reconcile(s, "is-active", false, startService, stopService) {
 					rem.ServicesStopped = append(rem.ServicesStopped, s)
 				}
-				disableService(s)
+				if reconcile(s, "is-enabled", false, enableService, disableService) {
+					rem.ServicesDisabled = append(rem.ServicesDisabled, s)
+				}
 			}
 		}
 	}
 
 	for _, s := range declared {
-		if s.Running {
-			if err := exec.Command("systemctl", "--system", "is-active", "--quiet", s.Name).Run(); err != nil {
-				if startService(s.Name) == nil {
-					rem.ServicesStarted = append(rem.ServicesStarted, s.Name)
-				}
-			}
-		} else {
-			if err := exec.Command("systemctl", "--system", "is-active", "--quiet", s.Name).Run(); err == nil {
-				stopService(s.Name)
+		if reconcile(s.Name, "is-active", s.Running, startService, stopService) {
+			if s.Running {
+				rem.ServicesStarted = append(rem.ServicesStarted, s.Name)
+			} else {
 				rem.ServicesStopped = append(rem.ServicesStopped, s.Name)
 			}
 		}
-		if s.Enabled {
-			if err := exec.Command("systemctl", "--system", "is-enabled", "--quiet", s.Name).Run(); err != nil {
-				if enableService(s.Name) == nil {
-					rem.ServicesEnabled = append(rem.ServicesEnabled, s.Name)
-				}
-			}
-		} else {
-			if err := exec.Command("systemctl", "--system", "is-enabled", "--quiet", s.Name).Run(); err == nil {
-				disableService(s.Name)
+		if reconcile(s.Name, "is-enabled", s.Enabled, enableService, disableService) {
+			if s.Enabled {
+				rem.ServicesEnabled = append(rem.ServicesEnabled, s.Name)
+			} else {
 				rem.ServicesDisabled = append(rem.ServicesDisabled, s.Name)
 			}
 		}

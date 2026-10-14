@@ -95,6 +95,13 @@ type CheckResult struct {
 	Status              string
 	Deviations          []string
 	ManifestGeneratedAt int64
+
+	// What the manifest promised, counted at check time. Carried on the result
+	// so callers can report scope without re-reading and re-parsing the
+	// manifest they just had checked.
+	FilesChecked    int
+	PackagesChecked int
+	ServicesChecked int
 }
 
 // Timestamp returns the check time as a time.Time.
@@ -177,20 +184,37 @@ func RunManifest(cfg *agentcfg.AgentConfig) (CheckResult, bool) {
 		result.Status = StatusManifestNotFound
 		return result, true
 	}
+	return CheckManifest(m, cfg), true
+}
 
-	if m.GeneratedAt > 0 && IsManifestStale(time.Now().Unix(), m.GeneratedAt) {
-		age_days := ManifestAgeDays(time.Now().Unix(), m.GeneratedAt)
-		fmt.Printf("audit: manifest is %d days old — re-run provisioning playbook to refresh\n", age_days)
+// CheckManifest verifies live system state against an already-loaded manifest.
+// It is the whole of the check: RunManifest is this plus reading the file, and
+// callers that already hold the manifest (a remediation pass re-checking its
+// own work) use this directly rather than parsing the same file twice.
+func CheckManifest(m Manifest, cfg *agentcfg.AgentConfig) CheckResult {
+	assert.True(cfg != nil, "cfg must not be nil")
+	assert.True(cfg.NodeID != "", "node_id must not be empty")
+
+	result := CheckResult{
+		NodeID:              cfg.NodeID,
+		TimestampUnix:       time.Now().Unix(),
+		ManifestGeneratedAt: m.GeneratedAt,
+		FilesChecked:        len(m.Files),
+		PackagesChecked:     len(m.Packages),
+		ServicesChecked:     len(m.Services),
 	}
 
-	result.ManifestGeneratedAt = m.GeneratedAt
+	if m.GeneratedAt > 0 && IsManifestStale(result.TimestampUnix, m.GeneratedAt) {
+		age_days := ManifestAgeDays(result.TimestampUnix, m.GeneratedAt)
+		fmt.Printf("audit: manifest is %d days old — re-run provisioning playbook to refresh\n", age_days)
+	}
 
 	checks := cfg.CheckSet
 	if len(checks) == 0 {
 		checks = DefaultCheckSet()
 	}
 
-	var deviations []string
+	deviations := []string{}
 	deviations = append(deviations, checkFiles(m.Files, checks, cfg.FastScan)...)
 	deviations = append(deviations, checkPackages(m.Packages)...)
 	deviations = append(deviations, checkServices(m.Services)...)
@@ -199,13 +223,13 @@ func RunManifest(cfg *agentcfg.AgentConfig) (CheckResult, bool) {
 	deviations = append(deviations, checkUnauthorizedPackages(m.PackageSnapshot)...)
 	deviations = append(deviations, checkUnauthorizedServices(m.ServiceSnapshot)...)
 
+	result.Deviations = deviations
 	if len(deviations) > 0 {
 		result.Status = StatusDriftDetected
-		result.Deviations = deviations
 	} else {
 		result.Status = StatusOK
 	}
-	return result, true
+	return result
 }
 
 // ProbeManifest verifies the manifest file exists and is parseable.

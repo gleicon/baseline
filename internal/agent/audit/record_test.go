@@ -111,7 +111,7 @@ func TestRecordBeginEnd(t *testing.T) {
 		t.Fatalf("expected added=2 removed=1, got added=%d removed=%d", added, removed)
 	}
 
-	m, err := LoadFile(manifest)
+	m, err := loadManifest(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestRecordSnapshotBootstrap(t *testing.T) {
 	if n != 2 {
 		t.Fatalf("expected 2 tracked files, got %d", n)
 	}
-	m, err := LoadFile(manifest)
+	m, err := loadManifest(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestRecordSnapshotBootstrap(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(conf, "a.conf"), []byte("a=9\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	check, err := LoadFile(manifest)
+	check, err := loadManifest(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestRecordObservedMerge(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("expected 1 tracked file, got %d", n)
 	}
-	m, err := LoadFile(manifest)
+	m, err := loadManifest(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
