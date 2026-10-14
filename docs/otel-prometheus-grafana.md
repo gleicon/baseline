@@ -12,12 +12,19 @@ rules. Grafana renders a dashboard and fires its own alerts. Everything runs in
 Docker (Compose) with nothing installed on your host.
 
 ```
-baseline-agent -> otel-collector (prometheus exporter :9464) -> Prometheus (:9090)
-     |                              |                            |
-     |                              + git debug + file (telemetry.json)
-     |                                                          + alert rules
-     + heartbeats + drift metrics                                 -> Grafana (:3000) dashboard + alerts
-                                                                            -> webhook (run-webhook.sh)
+baseline-agent          heartbeats + drift metrics + check log records
+      │ OTLP/HTTP :4318
+      ▼
+otel-collector          exporters: prometheus :9464, debug, file
+      │ scrape :9464                        └─ e2e/out/telemetry.json
+      ▼
+Prometheus :9090        stores metrics, evaluates rules.yml
+      │ datasource
+      ▼
+Grafana :3000           dashboard + unified alerting
+      │ webhook
+      ▼
+run-webhook.sh :9999    prints the notification
 ```
 
 ## Run it
@@ -72,8 +79,10 @@ Loaded by Grafana at startup; restart Grafana to re-read.
 
 - `datasources/datasources.yml`: a Prometheus datasource with `uid: prometheus`
   (rules and dashboard reference it by UID).
-- `dashboards/dashboards.yml` + `baseline.json`: a folder provider that auto-loads
-  the dashboard.
+- `dashboards/dashboards.yml`: a folder provider pointing at
+  `/var/lib/grafana/dashboards`, where `e2e/observe/grafana/dashboards/baseline.json`
+  is mounted. That JSON lives outside `provisioning/`; Compose mounts the two
+  trees separately.
 - `alerting/alertrules.yml`: Grafana Unified Alerting rules mirroring the
   Prometheus rules. Each rule is query, reduce (last), threshold (gt 0). All
   three use `noDataState: OK`, because an empty query result is normal (the
@@ -103,19 +112,33 @@ to `/tmp/baseline-webhook.log`.
 
 ## Build your own environment
 
+> **This stack is a demo, not a template you can ship as-is.** It is tuned for a
+> 60-second E2E run. Four settings must change before any real use:
+
+| Setting | Shipped | Where | Real environment |
+|---------|---------|-------|------------------|
+| `GF_AUTH_ANONYMOUS_ENABLED` | `true` (Viewer) | `docker-compose.observe.yml` | `false` — anyone reaching :3000 reads your dashboards |
+| `--storage.tsdb.retention.time` | `2h` | `docker-compose.observe.yml` (Prometheus **command line**, not `prometheus.yml`) | `15d` or more — at 2h you have no drift history |
+| `GF_SECURITY_ADMIN_PASSWORD` | `admin` | `docker-compose.observe.yml` | a real secret |
+| Bind address / TLS | `0.0.0.0`, plaintext | `ports:` on every service | bind to localhost or a private network; terminate TLS |
+
+Retention is the one that bites silently: it lives on the command line, so
+copying `prometheus.yml` as step 2 says carries none of it.
+
 1. Ship the collector with `otelcol.yaml`. Point your agents at it with
    `OTEL_EXPORTER_OTLP_ENDPOINT=http://<collector>:4318`, or `otlp_endpoint` in
    `agent.toml`.
 2. Ship Prometheus with `prometheus.yml`. Change the scrape target from
    `otelcol:9464` to your collector's host.
-3. Ship Grafana with the `provisioning/` tree. Edits for a real environment:
+3. Ship Grafana with the `provisioning/` tree **and** the `grafana/dashboards/`
+   tree (the dashboard JSON mounts separately, at `/var/lib/grafana/dashboards`).
+   Edits for a real environment:
    - `datasources.yml`: `url: http://prometheus:9090` to your Prometheus.
    - `contactpoints.yml`: replace the webhook URL with your notification
      target. Add SMTP to `grafana.ini` for email.
-   - `dashboards/baseline.json`: labels use `host_name` (the agent's `host.name`).
-4. Secure it: enable Grafana auth and change the admin password, put Prometheus
-   behind auth or TLS, and use OTLP headers/TLS on the agent if the collector
-   requires them.
+   - `grafana/dashboards/baseline.json`: labels use `host_name` (the agent's `host.name`).
+4. Apply the four changes from the table above, and use OTLP headers/TLS on the
+   agent if your collector requires them.
 
 ## Notes
 

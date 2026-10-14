@@ -5,10 +5,9 @@ manifest as the last step (via the agent binary `-write-manifest`), and
 verifies the baseline reads clean.
 No hub, no secrets, no certificates.
 
-> **Golden rule:** baseline checks only what the manifest documents. Packages and
-> services are snapshotted automatically; files are never snapshotted, so list
-> each file in `baseline_manifest_files` or let `-scan-playbook` derive it. If it
-> matters, promise it.
+> **Golden rule:** baseline checks only what the manifest documents — list every
+> file you want checked in `baseline_manifest_files`. Full text:
+> [the collection README](../../README.md).
 
 ## Install
 
@@ -72,6 +71,10 @@ collections_path = ./collections
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `baseline_agent_binary` | optional | Local path to a pre-staged `baseline-agent` binary (copy) |
+| `baseline_install_dir` | `/usr/local/bin` | Where the `baseline-agent` binary is installed |
+| `baseline_config_dir` | `/etc/baseline` | Holds `agent.toml` (0400) and, by default, the manifest |
+| `baseline_log_dir` | `/var/log/baseline` | Agent stdout/stderr target, logrotated |
+| `baseline_user` | `baseline` | System account the service runs as (no login shell) |
 | `baseline_release_base` | optional | Download prefix; appends `/baseline-agent-linux-<arch>`. Set one of these two. |
 | `baseline_otlp_endpoint` | unset (stdout) | OTLP/HTTP receiver for verdicts + liveness |
 | `baseline_manifest_path` | `/etc/baseline/manifest.json` | Where the manifest is recorded |

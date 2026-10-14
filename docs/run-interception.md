@@ -13,15 +13,15 @@ things.
 
 ## Principle
 
+**Node inventory**: the set of state a provisioning tool manages on one node,
+recorded so baseline can check it. Not Ansible's host inventory (the list of
+nodes a play targets) — this is a fileset.
+
 Observe the effect of the run, not the recipe. Snapshot the node before any
 state change runs, snapshot it again after, diff to find what changed, and make
-that the **node inventory** for the node. The node inventory is the set of
-state Ansible (or another tool) manages there, recorded so baseline can check it.
-This term is about the state fileset, not Ansible's host inventory (the list
-of nodes a play targets). Whatever changed is captured exactly, including files
+that the node inventory. Whatever changed is captured exactly, including files
 written by `command`/`shell` and templates resolved at run time. It does not
-matter how a file was changed, only whether the run changed it. The mechanism
-is agnostic to the tool that changed the state; Ansible is one example.
+matter how a file was changed, only whether the run changed it.
 
 ## Mechanism
 
@@ -61,6 +61,10 @@ baseline-agent -record-end -manifest /etc/baseline/manifest.json \
   -data /var/lib/baseline/pre.json -dirs /etc,/opt,/srv
 ```
 
+All `-record-*` modes run as root: they read every file under the roots
+(`/etc` included) and write the index and manifest to root-owned paths. Under
+Ansible that means `become: true`.
+
 `record-begin` hashes all regular files under the chosen roots into a pre-index.
 `record-end` re-hashes, diffs, adds the changed and new paths to the manifest
 file list with their attributes, removes files the run deleted from tracking,
@@ -72,16 +76,6 @@ manifest accumulates the union of deltas across runs, so the tracked surface
 grows as the recipes evolve. Re-running an unchanged recipe produces no diff
 and does not grow the manifest.
 
-The baseline agent CLI uses flags, not subcommands:
-
-```sh
-baseline-agent -record-begin -data /var/lib/baseline/pre.json \
-  -dirs /etc,/usr/local/etc,/opt,/srv
-# ... existing cookbooks run ...
-baseline-agent -record-end -manifest /etc/baseline/manifest.json \
-  -data /var/lib/baseline/pre.json -dirs /etc,/usr/local/etc,/opt,/srv
-```
-
 The index file and the manifest are written owner-only. The commands reuse the
 agent's hashing and package/service snapshot code.
 
@@ -92,13 +86,22 @@ node a run with no changes yields an empty inventory. To start from today, use
 `-record-snapshot`: it tracks every file under the roots as the baseline, no
 diff required.
 
+Name the service config directories you actually manage, not all of `/etc`:
+
 ```sh
 baseline-agent -record-snapshot -manifest /etc/baseline/manifest.json \
-  -dirs /etc,/usr/local/etc,/opt,/srv
+  -dirs /etc/nginx,/etc/ssh,/opt/app
 ```
 
-This is the day-one bootstrap: install the agent, snapshot once, and the node
-is tracked from then on.
+> **Do not snapshot all of `/etc`.** There is no exclusion list — every regular
+> file under a root is tracked. Several files under `/etc` are rewritten by the
+> machine itself and become permanent drift that no playbook run can fix:
+> `resolv.conf` (DHCP), `ld.so.cache` (any package install), `adjtime` (clock
+> sync), `shadow` (any password change). The only way out is re-recording, which
+> adopts every *other* deviation at the same time. Keep the roots narrow.
+
+With narrow roots this is the day-one bootstrap: install the agent, snapshot
+once, and the node is tracked from then on.
 
 ## Controller-side capture (no node binary at record time)
 
@@ -146,24 +149,6 @@ the operator sets the check set in `agent.toml`, for example
 identical content (cron, sed, logrotate-style tools). Size catches truncation.
 The attributes are stored at record time, so the fidelity decision can be made
 later without re-provisioning.
-
-## Design review
-
-Decisions that keep this small:
-
-- Observe the effect, not the recipe. No YAML parser, no Ansible module
-  semantics. The before/after diff is exact by construction.
-- The agent does the work on the node. The manifest stays on the node, matching
-  the existing check model. No controller-side component and no shipping of
-  observed files to nodes.
-- One wrapper play imports the existing configs. Their recipes are never
-  edited.
-- The record commands reuse existing code: hashing, package/service snapshot,
-  and the manifest JSON. Schema stays 1; file entries gain size and mtime.
-- Deliberately not included in v1: a callback plugin (controller-side, misses
-  `command`/`shell` writes, adds a controller-to-node shipping step), tracking
-  every file on disk (OS noise), and silently auto-adopting changes into the
-  baseline. A run with no edits must not grow the manifest.
 
 ## Adoption flow
 

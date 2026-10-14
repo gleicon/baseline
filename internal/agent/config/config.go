@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/gleicon/baseline/internal/assert"
@@ -24,7 +26,6 @@ type AgentConfig struct {
 	AuditIntervalSec     int
 	AuditJitterMaxSec    int
 	OTLPEndpoint         string
-	Remediate            bool
 	CheckSet             []string
 	FastScan             bool
 }
@@ -40,7 +41,6 @@ type agentSection struct {
 	AuditIntervalSec     int      `toml:"audit_interval_sec"`
 	AuditJitterMaxSec    int      `toml:"audit_jitter_max_sec"`
 	OTLPEndpoint         string   `toml:"otlp_endpoint"`
-	Remediate            bool     `toml:"remediate"`
 	CheckSet             []string `toml:"check"`
 	FastScan             bool     `toml:"fast_scan"`
 }
@@ -57,8 +57,19 @@ func Load(path string) (*AgentConfig, error) {
 	assert.True(len(data) > 0, "config file must not be empty")
 
 	var raw agentTOML
-	if _, err := toml.Decode(string(data), &raw); err != nil {
+	md, err := toml.Decode(string(data), &raw)
+	if err != nil {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
+	}
+	// Unknown keys are not a parse error, so a key this build no longer honors
+	// (or a typo) would otherwise pass silently. Warn instead of failing: a
+	// fatal config stops baseline.alive and turns a typo into a dead-man alert.
+	if undecoded := md.Undecoded(); len(undecoded) > 0 {
+		keys := make([]string, 0, len(undecoded))
+		for _, k := range undecoded {
+			keys = append(keys, k.String())
+		}
+		slog.Warn("config: ignoring unknown keys", "path", path, "keys", strings.Join(keys, ", "))
 	}
 	if raw.Agent.ManifestPath == "" {
 		return nil, fmt.Errorf("invalid config: manifest_path is required")
@@ -71,7 +82,6 @@ func Load(path string) (*AgentConfig, error) {
 		AuditIntervalSec:     audit_interval_sec_default,
 		AuditJitterMaxSec:    audit_jitter_max_sec_default,
 		OTLPEndpoint:         raw.Agent.OTLPEndpoint,
-		Remediate:            raw.Agent.Remediate,
 		CheckSet:             raw.Agent.CheckSet,
 		FastScan:             raw.Agent.FastScan,
 	}

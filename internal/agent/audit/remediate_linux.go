@@ -25,7 +25,7 @@ var errNoPackageManager = fmt.Errorf("no package manager found")
 // playbook is the only complete remediation.
 //
 // Auto-remediation is NEVER on by default; callers must have explicitly
-// authorized it (-remediate / remediate=true).
+// authorized it (-remediate).
 func Remediate(m Manifest) Remediation {
 	var rem Remediation
 	rem.PackagesRemoved = remediatePackages(m.PackageSnapshot)
@@ -84,9 +84,13 @@ func remediateServices(rem *Remediation, serviceSnapshot []string, declared []Ma
 		current, err := listActiveServices()
 		if err == nil {
 			for _, s := range unauthorizedSet(serviceSnapshot, current) {
-				stopService(s)
+				// Report only what demonstrably stopped, matching the declared
+				// branch below. A service that resists the stop keeps flagging
+				// as svc:unauthorized on the next check, so nothing is lost.
+				if stopService(s) == nil {
+					rem.ServicesStopped = append(rem.ServicesStopped, s)
+				}
 				disableService(s)
-				rem.ServicesStopped = append(rem.ServicesStopped, s)
 			}
 		}
 	}

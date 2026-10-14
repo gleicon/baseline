@@ -32,7 +32,7 @@ baseline-agent -write-manifest (last task)
 | `internal/agent/otel` | OTel providers; gauges, counter, log records |
 | `internal/agent/sdnotify` | Inline sd_notify, no CGO |
 | `internal/assert` | Precondition helper |
-| `baseline.fleet` collection | `agent` role (provision-time), invokes the agent binary |
+| `baseline.fleet` collection | `agent` role (provision-time) plus the `baseline_capture` callback plugin; both drive the agent binary |
 
 ## Rules
 

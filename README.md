@@ -26,9 +26,9 @@ does this via its `baseline_manifest_*` variables; directly it looks like:
            -files, /etc/nginx/nginx.conf,/etc/ssh/sshd_config, -snapshot]
 ```
 
-Golden rule: baseline checks only what the manifest documents. Packages and
-services are snapshotted automatically; files are never snapshotted, so
-document every file you want checked. If it matters, promise it.
+Golden rule: baseline checks only what the manifest documents — an unlisted file
+is an unchecked file. Full text and the reasoning:
+[docs/drift-operations.md](docs/drift-operations.md#golden-rule).
 
 The agent runs as a systemd daemon (`-config /etc/baseline/agent.toml`, only
 `manifest_path` required) or one-shot (`-check`). Each check emits

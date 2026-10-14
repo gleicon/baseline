@@ -8,9 +8,10 @@ single binary (`baseline-agent`) and no server side. You provision with Ansible;
 of installed packages and active services) and periodically checks the node
 against it, emitting verdicts and heartbeats over OpenTelemetry to your own
 pipeline. All alerting happens downstream (Prometheus / Grafana). No hub, no
-secrets, no certificates. Detect by default; remediation is an explicit opt-in
-(`-remediate` / `remediate = true`), and file content is always restored by the
-provisioning playbook (IaS is the source of truth for content).
+secrets, no certificates. Detect by default; remediation is an explicit
+one-shot opt-in (`-remediate`, root, no daemon equivalent), and file content is
+always restored by the provisioning playbook (IaS is the source of truth for
+content).
 
 ## Stack
 
@@ -32,18 +33,19 @@ provisioning playbook (IaS is the source of truth for content).
 | `cmd/agent/` | `baseline-agent` entrypoint: check / write-manifest / scan-playbook / remediate flags, daemon loops, OTel wiring |
 | `internal/agent/audit/` | Manifest load/generate/scan/check/remediate (the drift core; linux/darwin split) |
 | `internal/agent/otel/` | OTel Setup + Emit (drift status, details-with-deviations, alive, checks) |
-| `internal/agent/config/` | TOML loader (`manifest_path` required; heartbeat/audit intervals; `remediate` opt-in) |
+| `internal/agent/config/` | TOML loader (`manifest_path` required; heartbeat/audit intervals; warns on unknown keys) |
 | `internal/agent/sdnotify/` | Inline sd_notify (no CGO) |
 | `internal/assert/` | Precondition helper |
 | `ansible/collections/baseline/fleet/` | `agent` role (install, systemd unit, logrotate, manifest record via binary) |
-| `deploy/ansible/` | `bootstrap.yml`, `dev-bootstrap.yml`, unit templates, inventory |
+| `deploy/ansible/` | `dev-bootstrap.yml` (VM dev-loop bootstrap) |
 | `e2e/` | Four Docker E2E suites: `e2e` (daemon→collector), `e2e-ansible`, `e2e-systemd`, `e2e-live` (collector→Prometheus→Grafana) |
 | `docs/` | Live docs: `development.md`, `architecture.md`, `run-interception.md`, `drift-operations.md`, `otel-prometheus-grafana.md` |
 
 ## Constraints
 
 **Safety (non-negotiable):**
-- Agent has no write path to its own manifest (read-only check); it never
+- The daemon and `-check` paths never write the manifest (read-only check);
+  only the explicit `-write-manifest` / `-record-*` modes do. The agent never
   rewrites host config. Remediation is opt-in and only touches packages &
   services recorded in the snapshot, never files, and never any state the
   manifest doesn't capture (users, cron, firewall, sysctl, …).
@@ -60,11 +62,3 @@ provisioning playbook (IaS is the source of truth for content).
 - Golden rule: baseline checks only what the manifest documents: packages/services
   are snapshotted automatically, files must be declared in the playbook or the
   manifest.
-
-## Status
-
-Manifest generation, drift checking (files/packages/services/snapshot), OTel
-emission, fleet-visible deviation metric (`baseline.drift.details`), permission
-alerts (`svc:unverifiable`, `CHECK_ERROR`), opt-in auto-remediation
-(`-remediate`/`remediate=true`), four Docker E2E suites, live
-Prometheus/Grafana stack. See `docs/` for the running doc set.

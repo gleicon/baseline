@@ -217,14 +217,6 @@ func runAuditLoop(ctx context.Context, cfg *agentcfg.AgentConfig, otel *agentote
 		if !ok {
 			continue
 		}
-		// Explicitly authorized auto-remediation (remediate=true in the config,
-		// OFF by default). Enforces the manifest for packages/services; file
-		// deviations remain the provisioning playbook's job (IaS).
-		if cfg.Remediate && result.Status == audit.StatusDriftDetected {
-			if rem, err := audit.RemediatePath(cfg.ManifestPath); err == nil && !rem.Empty() {
-				slog.Info(fmt.Sprintf("remediate: %s", rem.String()))
-			}
-		}
 		otel.EmitCheck(ctx, result)
 		if result.Status == audit.StatusOK {
 			slog.Info("audit: clean")

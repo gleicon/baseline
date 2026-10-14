@@ -30,9 +30,9 @@ const ManifestStaleDays = 90
 
 // Remediation summarizes what one manifest-enforcement pass changed.
 // Auto-remediation is NEVER on by default: it only runs when explicitly
-// authorized (-remediate / remediate=true). Files are intentionally not in
-// the agent's remediation scope — restoring file content is the provisioning
-// playbook's job (IaS is the source of truth for file content).
+// authorized it with -remediate. There is no daemon equivalent. Files are
+// intentionally not in the agent's remediation scope — restoring file content
+// is the provisioning playbook's job (IaS is the source of truth for content).
 type Remediation struct {
 	PackagesRemoved  []string
 	ServicesStarted  []string
@@ -84,17 +84,6 @@ func unauthorizedSet(allowed, current []string) []string {
 		}
 	}
 	return out
-}
-
-// RemediatePath loads the manifest at path and enforces it (see Remediate).
-// Only meaningful when the caller has explicitly authorized remediation.
-func RemediatePath(path string) (Remediation, error) {
-	assert.True(path != "", "path must not be empty")
-	m, err := loadManifest(path)
-	if err != nil {
-		return Remediation{}, err
-	}
-	return Remediate(m), nil
 }
 
 const secsPerDay = 86400

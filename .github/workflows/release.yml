@@ -1,0 +1,62 @@
+name: Release
+
+# Publishes the linux agent binaries the baseline.fleet.agent role downloads.
+# The role builds the asset name as baseline-agent-linux-<arch>, so these file
+# names are load-bearing: changing them breaks baseline_release_base.
+#
+# Tag push publishes automatically. workflow_dispatch exists to backfill a tag
+# that predates this workflow (and to re-run a failed upload) without deleting
+# and re-pushing a published ref.
+#
+# Single job on purpose: the release has to be created exactly once before any
+# asset upload, which a per-arch matrix would race on.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and upload assets for
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: Build linux binaries
+        run: |
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
+              go build -trimpath -o "baseline-agent-linux-$arch" ./cmd/agent
+          done
+          ls -l baseline-agent-linux-*
+
+      - name: Ensure the release exists
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists"
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          fi
+
+      - name: Upload the binaries
+        run: |
+          gh release upload "$TAG" \
+            baseline-agent-linux-amd64 \
+            baseline-agent-linux-arm64 \
+            --clobber

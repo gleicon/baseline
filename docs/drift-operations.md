@@ -4,7 +4,8 @@ Find out what drifted, fix it, and verify the fix, for one node or a fleet.
 
 Default posture: detect and alert. Nothing is auto-fixed. The standard fix path
 is Infrastructure as Code: re-run your provisioning playbook. Remediation is an
-explicit opt-in (`-remediate` / `remediate = true`), never the default.
+explicit opt-in (`-remediate`, one-shot, as root), never the default and never a
+daemon setting.
 
 ## Golden rule
 
@@ -66,9 +67,13 @@ baseline-agent -check -format json -manifest /etc/baseline/manifest.json
 
 Re-run the provisioning playbook. It re-applies `template:`/`copy:`/`lineinfile:`
 content (so deleted files come back), service states, and re-records the
-manifest as the new baseline. Be careful: re-recording adopts the current
-state. If you installed vim and just re-run, vim becomes authorized. Re-run
-only after you decide the current state is correct.
+manifest as the new baseline.
+
+> **Re-recording adopts whatever is on the node right now.** The manifest is
+> rewritten from live state, so every deviation present at that moment becomes
+> the new promise — the one you were investigating included. If you installed
+> vim by hand and re-run the play, vim becomes authorized and stops alerting.
+> Re-run only after deciding the current state is correct.
 
 Manual, single node:
 
@@ -85,7 +90,7 @@ systemctl start --now nginx && systemctl enable nginx        # or stop/disable
 
 ### Authorized auto-remediation (opt-in, off by default)
 
-> Warning: `-remediate` / `remediate = true` enforces only the packages and
+> Warning: `-remediate` enforces only the packages and
 > services recorded in the manifest snapshot. The manifest is not a complete
 > system-state model. Baseline does not know about and will not touch users,
 > sudoers, SSH keys, cron jobs, firewall rules, sysctl parameters, or any other
@@ -99,26 +104,12 @@ systemctl start --now nginx && systemctl enable nginx        # or stop/disable
 baseline-agent -check -remediate -manifest /etc/baseline/manifest.json
 ```
 
-Daemon-mode enforcement on every audit:
+There is no daemon equivalent. The agent's audit loop never remediates: the
+systemd unit runs it as an unprivileged user with no capabilities, so package
+and service enforcement cannot work from there. Remediation is always an
+explicit, root-invoked, one-shot command.
 
-```toml
-[agent]
-remediate = true   # off by default; deliberate opt-in
-```
-
-## Promises
-
-- The manifest is the promise snapshot. It records files, packages, services,
-  and (in snapshot mode) the full package and service lists. The agent does not
-  alter it.
-- The provisioning playbook is the source of truth for file content. Baseline
-  remediates packages and services but never rewrites files, because it has no
-  content to write and IaS is where file content lives.
-- Keep promises fresh. A stale manifest is a stale promise; re-baseline with a
-  play run after any intentional change. The agent logs every remediation
-  action, so enforcement is visible and reversible.
-
-Example promise flow:
+Example flow:
 
 ```sh
 # operator installed vim on a node by hand
@@ -131,6 +122,5 @@ baseline-agent -check -manifest /etc/baseline/manifest.json      # OK: no drift
 # alert auto-resolves, status 0, history kept
 ```
 
-Fleet-wide, run `-remediate` via `ansible -m command` or set `remediate = true`
-on the nodes. Grafana and Prometheus show every node's deviations until it is
-back in compliance.
+Fleet-wide, run `-remediate` via `ansible -m command` (as root). Grafana and
+Prometheus show every node's deviations until it is back in compliance.

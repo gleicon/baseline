@@ -9,18 +9,20 @@ the VM dev loop (`brew install lima`); on Linux no VM is needed.
 
 | Flag | Meaning |
 |------|---------|
+| `-check` | One-shot manifest check, then exit (mutually exclusive with `-write-manifest`) |
+| `-write-manifest` | Generate a manifest from live state, then exit |
 | `-manifest PATH` | Check target, or `-write-manifest` destination |
 | `-files a,b` | Absolute file paths to hash |
 | `-packages a,b` | Package names (`name` or `name=version` to pin) |
 | `-services a,b` | Service names (actual state is recorded) |
 | `-settings a,b` | Runtime keys to track (`sysctl:<name>`); the live value is recorded and checked |
-| `-snapshot` | Also record all installed packages and active services; later additions flag `pkg:unauthorized:*` / `svc:unauthorized:*` |
+| `-snapshot` | Also record all installed packages and active services. Anything installed or started *after* this recording flags as `pkg:unauthorized:*` / `svc:unauthorized:*` |
 | `-scan-playbook a.yml` | Extract managed paths from playbooks (feeds `-write-manifest`, or prints them alone) |
 | `-format text\|json` | `-check` output (default `text`); exits 0 clean / 1 drift / 2 error |
 | `-node-id ID` | Report label (default: hostname) |
 | `-config PATH` | Agent TOML (`manifest_path` is the only required field) |
 | `-otlp-endpoint URL` | OTLP/HTTP receiver (default: `OTEL_EXPORTER_OTLP_ENDPOINT` env, else stdout) |
-| `-remediate` | Enforce the manifest (remove unauthorized packages/services, fix declared service states). Off by default; the standard fix is re-running the provisioning playbook. Files are never auto-restored. |
+| `-remediate` | With `-check`: enforce the manifest (remove unauthorized packages/services, fix declared service states). Needs root. One-shot only — there is no daemon equivalent. The standard fix is re-running the provisioning playbook. Files are never auto-restored. |
 | `-record-begin` | Index the file tree under `-dirs` into `-data` before a change window |
 | `-record-end` | Diff `-data` against a fresh index and merge the changed files into `-manifest` (the node inventory) |
 | `-record-snapshot` | Track every file under `-dirs` as a baseline (no diff); bootstrap an already-provisioned node |
@@ -36,10 +38,9 @@ play (via `ansible -m command`, plain SSH, no daemon), from the CLI
 build the same file. Track what the playbook manages (`template:` / `copy:` /
 `lineinfile:` destinations); that is the drift surface.
 
-Golden rule: baseline checks only what the manifest documents. Packages and
-services are snapshotted automatically; files are never snapshotted, so
-document every file you want checked in Ansible or directly in the manifest.
-If it matters, promise it.
+Golden rule: baseline checks only what the manifest documents — an unlisted file
+is an unchecked file. Full text:
+[drift-operations.md](drift-operations.md#golden-rule).
 
 The scanner follows tasks, handlers, blocks, static includes, play `vars:` and
 `vars_files:`, and static `loop:` over `{{ item }}`. What it cannot resolve
@@ -94,13 +95,13 @@ heartbeat_interval_sec = 60
 audit_interval_sec    = 1200
 audit_jitter_max_sec  = 120
 # otlp_endpoint = "http://otelcol.internal:4318"  # omit for stdout export
-# remediate     = false  # only enforces packages & services in the manifest
-#                        # snapshot. Re-run the provisioning playbook instead.
 # check         = ["sha256", "mode"]   # file attributes to compare; add "size"
 #                                      # or "mtime" to check those too
 # fast_scan     = false  # trust size+mtime and skip the sha256 for unchanged
-#                        # files. ~6x faster checks on large inventories;
-#                        # opt-in because it trusts stat as the change signal.
+#                        # files. ~6x faster checks on large inventories.
+#                        # Trade-off: a content change that preserves both size
+#                        # and mtime is NOT detected (a rewrite that restores
+#                        # the timestamp). Leave it off where that matters.
 ```
 
 ## E2E over Docker
@@ -113,6 +114,7 @@ All suites run in Docker with no host or VM changes.
 | `make e2e-ansible` | Provision a throwaway container with Ansible (`-write-manifest`, snapshot, `-remediate`), scan-playbook, record interception, settings (sysctl/modules/sysctl:all), drift, restore |
 | `make e2e-systemd` | The `baseline.fleet.agent` role in a real systemd container; service and file drift, permission alert |
 | `make e2e-live` | Daemon to collector to Prometheus to Grafana; leaves the stack running (tear down with `make e2e-live-down`) |
+| `make e2e-live-webhook` | Optional listener for the live stack; prints Grafana alert notifications as they fire |
 
 The agent binary is the single manifest generator; Ansible invokes
 `-write-manifest` directly (the `agent` role does this as its last step).
