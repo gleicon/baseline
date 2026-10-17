@@ -2,14 +2,22 @@
 
 package audit
 
+import "errors"
+
 // checkPackages and checkServices are no-ops on non-Linux platforms.
 // The agent is designed for Linux fleet nodes; this stub allows the package
 // to compile on macOS for development and testing.
 
-func checkPackages(_ []ManifestPackage) []string    { return nil }
-func checkServices(_ []ManifestService) []string    { return nil }
-func checkUnauthorizedPackages(_ []string) []string { return nil }
-func checkUnauthorizedServices(_ []string) []string { return nil }
+func checkPackages(_ []ManifestPackage) []string { return nil }
+func checkServices(_ []ManifestService) []string { return nil }
+
+// The unauthorized checks are platform-independent (see manifest.go); only the
+// live lookups they call are not. Reporting an error keeps them silent rather
+// than claiming an empty system, which would flag every tracked item as drift.
+var errNoLookup = errors.New("no package or service lookup on this platform")
+
+func listInstalledPackages() ([]string, error) { return nil, errNoLookup }
+func listActiveServices() ([]string, error)    { return nil, errNoLookup }
 
 // Non-Linux stubs for manifest generation helpers (see manifest_linux.go).
 // Generation is a Linux-target operation; on other platforms package/service

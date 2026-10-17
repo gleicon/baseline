@@ -136,44 +136,6 @@ func checkServices(services []ManifestService) []string {
 	return deviations
 }
 
-func checkUnauthorizedPackages(snapshot []string) []string {
-	if len(snapshot) == 0 {
-		return nil
-	}
-	allowed := make(map[string]bool, len(snapshot))
-	for _, p := range snapshot {
-		allowed[p] = true
-	}
-	current, err := listInstalledPackages()
-	if err != nil {
-		return nil
-	}
-	var deviations []string
-	for _, p := range current {
-		if !allowed[p] {
-			deviations = append(deviations, "pkg:unauthorized:"+p)
-		}
-	}
-	return deviations
-}
-
-func checkUnauthorizedServices(snapshot []string) []string {
-	if len(snapshot) == 0 {
-		return nil
-	}
-	allowed := make(map[string]bool, len(snapshot))
-	for _, s := range snapshot {
-		allowed[s] = true
-	}
-	var deviations []string
-	for _, s := range listBrewServices() {
-		if s.running && !allowed[s.name] {
-			deviations = append(deviations, "svc:unauthorized:"+s.name)
-		}
-	}
-	return deviations
-}
-
 func ListActiveServices() []string {
 	var out []string
 	for _, s := range listBrewServices() {
@@ -189,14 +151,4 @@ func listActiveServices() ([]string, error) {
 		return nil, fmt.Errorf("brew not found")
 	}
 	return ListActiveServices(), nil
-}
-
-func splitLines(s string) []string {
-	var out []string
-	for _, l := range strings.Split(strings.TrimSpace(s), "\n") {
-		if l = strings.TrimSpace(l); l != "" {
-			out = append(out, l)
-		}
-	}
-	return out
 }

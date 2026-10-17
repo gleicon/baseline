@@ -36,18 +36,32 @@ func ScanPlaybooks(paths []string) (files []string, warnings []string, err error
 	assert.True(len(paths) > 0, "paths must not be empty")
 	s := &scanner{visited: map[string]bool{}}
 	for _, p := range paths {
-		if err := s.scanFile(p, map[string]string{}, &files, &warnings); err != nil {
+		if err := s.scanFile(p, map[string]string{}); err != nil {
 			return nil, nil, err
 		}
 	}
-	return Dedupe(files), Dedupe(warnings), nil
+	return Dedupe(s.files), Dedupe(s.warnings), nil
 }
 
+// scanner accumulates one scan: which files it has already visited (so a
+// cyclic include terminates) and what it found. The results live here rather
+// than threading two *[]string out-params through every method.
 type scanner struct {
-	visited map[string]bool
+	visited  map[string]bool
+	files    []string
+	warnings []string
 }
 
-func (s *scanner) scanFile(path string, vars map[string]string, files, warnings *[]string) error {
+// found records a managed path.
+func (s *scanner) found(path string) { s.files = append(s.files, path) }
+
+// warnf records something the scanner could not resolve statically. Warnings
+// are surfaced to the operator, never silently dropped.
+func (s *scanner) warnf(format string, a ...any) {
+	s.warnings = append(s.warnings, fmt.Sprintf(format, a...))
+}
+
+func (s *scanner) scanFile(path string, vars map[string]string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("resolve %q: %w", path, err)
@@ -78,7 +92,7 @@ func (s *scanner) scanFile(path string, vars map[string]string, files, warnings 
 	// Included task files are bare task lists, not plays: scan them directly.
 	if len(plays) > 0 {
 		if first, ok := plays[0].(map[string]any); ok && !isPlay(first) {
-			s.scanTaskList(plays, vars, dir, files, warnings)
+			s.scanTaskList(plays, vars, dir)
 			return nil
 		}
 	}
@@ -87,9 +101,9 @@ func (s *scanner) scanFile(path string, vars map[string]string, files, warnings 
 		if !ok {
 			continue
 		}
-		playVars := mergeVars(vars, playVarsOf(play, dir, warnings))
+		playVars := mergeVars(vars, s.playVarsOf(play, dir))
 		for _, section := range []string{"pre_tasks", "tasks", "post_tasks", "handlers"} {
-			s.scanTaskList(asList(play[section]), playVars, dir, files, warnings)
+			s.scanTaskList(asList(play[section]), playVars, dir)
 		}
 	}
 	return nil
@@ -111,7 +125,7 @@ func isPlay(m map[string]any) bool {
 
 // playVarsOf merges a play's vars: mapping plus best-effort vars_files
 // (top-level scalar keys only; unparseable files produce a warning).
-func playVarsOf(play map[string]any, dir string, warnings *[]string) map[string]string {
+func (s *scanner) playVarsOf(play map[string]any, dir string) map[string]string {
 	out := map[string]string{}
 	if m, ok := play["vars"].(map[string]any); ok {
 		for k, v := range m {
@@ -126,12 +140,12 @@ func playVarsOf(play map[string]any, dir string, warnings *[]string) map[string]
 		}
 		data, err := os.ReadFile(f)
 		if err != nil {
-			*warnings = append(*warnings, fmt.Sprintf("vars_file unreadable, vars inside left unresolved: %s", f))
+			s.warnf("vars_file unreadable, vars inside left unresolved: %s", f)
 			continue
 		}
 		var doc map[string]any
 		if err := yaml.Unmarshal(data, &doc); err != nil {
-			*warnings = append(*warnings, fmt.Sprintf("vars_file unparseable, vars inside left unresolved: %s", f))
+			s.warnf("vars_file unparseable, vars inside left unresolved: %s", f)
 			continue
 		}
 		for k, v := range doc {
@@ -143,7 +157,7 @@ func playVarsOf(play map[string]any, dir string, warnings *[]string) map[string]
 	return out
 }
 
-func (s *scanner) scanTaskList(tasks []any, vars map[string]string, dir string, files, warnings *[]string) {
+func (s *scanner) scanTaskList(tasks []any, vars map[string]string, dir string) {
 	for _, item := range tasks {
 		task, ok := item.(map[string]any)
 		if !ok {
@@ -157,7 +171,7 @@ func (s *scanner) scanTaskList(tasks []any, vars map[string]string, dir string, 
 		for _, section := range []string{"block", "rescue", "always"} {
 			if sub, ok := task[section].([]any); ok {
 				nested = true
-				s.scanTaskList(sub, localVars, dir, files, warnings)
+				s.scanTaskList(sub, localVars, dir)
 			}
 		}
 		if nested {
@@ -168,14 +182,14 @@ func (s *scanner) scanTaskList(tasks []any, vars map[string]string, dir string, 
 		if inc := includeFileOf(task); inc != "" {
 			inc = substituteVars(inc, localVars)
 			if hasTemplate(inc) {
-				*warnings = append(*warnings, fmt.Sprintf("task %q: dynamic include left unresolved: %s", taskName, inc))
+				s.warnf("task %q: dynamic include left unresolved: %s", taskName, inc)
 				continue
 			}
 			if !filepath.IsAbs(inc) {
 				inc = filepath.Join(dir, inc)
 			}
-			if err := s.scanFile(inc, localVars, files, warnings); err != nil {
-				*warnings = append(*warnings, fmt.Sprintf("task %q: %v", taskName, err))
+			if err := s.scanFile(inc, localVars); err != nil {
+				s.warnf("task %q: %v", taskName, err)
 			}
 			continue
 		}
@@ -187,24 +201,24 @@ func (s *scanner) scanTaskList(tasks []any, vars map[string]string, dir string, 
 			if !ok {
 				continue
 			}
-			s.scanModuleArgs(mod, args, val, task, taskName, localVars, loopItems, files, warnings)
+			s.scanModuleArgs(mod, args, val, task, taskName, localVars, loopItems)
 		}
 
 		// command/shell/script creates= paths.
-		s.scanCommandCreates(task, taskName, localVars, loopItems, files, warnings)
+		s.scanCommandCreates(task, taskName, localVars, loopItems)
 	}
 }
 
-func (s *scanner) scanModuleArgs(mod string, args []string, val any, task map[string]any, taskName string, vars map[string]string, loop []string, files, warnings *[]string) {
+func (s *scanner) scanModuleArgs(mod string, args []string, val any, task map[string]any, taskName string, vars map[string]string, loop []string) {
 	argMap, ok := val.(map[string]any)
 	if !ok {
-		*warnings = append(*warnings, fmt.Sprintf("task %q: %s args not a mapping, skipped", taskName, mod))
+		s.warnf("task %q: %s args not a mapping, skipped", taskName, mod)
 		return
 	}
 	// file state=absent cannot be expressed in a manifest (absence has no hash).
 	if mod == "file" {
 		if state, _ := argMap["state"].(string); state == "absent" {
-			*warnings = append(*warnings, fmt.Sprintf("task %q: file state=absent not trackable, skipped", taskName))
+			s.warnf("task %q: file state=absent not trackable, skipped", taskName)
 			return
 		}
 	}
@@ -215,18 +229,18 @@ func (s *scanner) scanModuleArgs(mod string, args []string, val any, task map[st
 		}
 		for _, expanded := range expandPath(raw, vars, loop) {
 			if expanded == "" {
-				*warnings = append(*warnings, fmt.Sprintf("task %q: %s %s=%q left unresolved, skipped", taskName, mod, arg, raw))
+				s.warnf("task %q: %s %s=%q left unresolved, skipped", taskName, mod, arg, raw)
 				continue
 			}
 			if mod == "unarchive" {
-				*warnings = append(*warnings, fmt.Sprintf("task %q: unarchive members under %s not enumerable, skipped", taskName, expanded))
+				s.warnf("task %q: unarchive members under %s not enumerable, skipped", taskName, expanded)
 				continue
 			}
 			if strings.HasSuffix(raw, "/") && mod == "get_url" {
-				*warnings = append(*warnings, fmt.Sprintf("task %q: get_url directory dest %s has unknown filename, skipped", taskName, expanded))
+				s.warnf("task %q: get_url directory dest %s has unknown filename, skipped", taskName, expanded)
 				continue
 			}
-			*files = append(*files, expanded)
+			s.found(expanded)
 		}
 		return // first present arg key wins
 	}
@@ -234,7 +248,7 @@ func (s *scanner) scanModuleArgs(mod string, args []string, val any, task map[st
 
 // scanCommandCreates records creates= paths (files the task ensures exist).
 // removes= paths express absence and are skipped with a warning.
-func (s *scanner) scanCommandCreates(task map[string]any, taskName string, vars map[string]string, loop []string, files, warnings *[]string) {
+func (s *scanner) scanCommandCreates(task map[string]any, taskName string, vars map[string]string, loop []string) {
 	hasCmd := false
 	oneLiners := []string{}
 	for k, v := range task {
@@ -255,17 +269,17 @@ func (s *scanner) scanCommandCreates(task map[string]any, taskName string, vars 
 		}
 		for _, expanded := range expandPath(raw, vars, loop) {
 			if expanded == "" {
-				*warnings = append(*warnings, fmt.Sprintf("task %q: creates=%q left unresolved, skipped", taskName, raw))
+				s.warnf("task %q: creates=%q left unresolved, skipped", taskName, raw)
 				continue
 			}
-			*files = append(*files, expanded)
+			s.found(expanded)
 		}
 	}
 	if c, ok := task["creates"].(string); ok {
 		collect(c)
 	}
 	if r, ok := task["removes"].(string); ok && r != "" {
-		*warnings = append(*warnings, fmt.Sprintf("task %q: removes=%q expresses absence, not trackable, skipped", taskName, r))
+		s.warnf("task %q: removes=%q expresses absence, not trackable, skipped", taskName, r)
 	}
 	// One-liner form: "shell: /bin/foo creates=/x".
 	for _, one := range oneLiners {

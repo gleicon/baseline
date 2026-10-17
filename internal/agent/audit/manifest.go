@@ -86,6 +86,50 @@ func unauthorizedSet(allowed, current []string) []string {
 	return out
 }
 
+// unauthorizedDeviations reports live items that the provisioning snapshot
+// does not account for, one deviation per item. A lookup failure yields no
+// deviations: an absent package manager or unqueryable service manager must
+// not read as drift. An empty snapshot means the manifest never promised a
+// complete inventory, so nothing can be unauthorized.
+func unauthorizedDeviations(prefix string, snapshot []string, live func() ([]string, error)) []string {
+	if len(snapshot) == 0 {
+		return nil
+	}
+	current, err := live()
+	if err != nil {
+		return nil
+	}
+	var deviations []string
+	for _, name := range unauthorizedSet(snapshot, current) {
+		deviations = append(deviations, prefix+name)
+	}
+	return deviations
+}
+
+// checkUnauthorizedPackages reports packages installed since provisioning.
+func checkUnauthorizedPackages(snapshot []string) []string {
+	return unauthorizedDeviations("pkg:unauthorized:", snapshot, listInstalledPackages)
+}
+
+// checkUnauthorizedServices reports services active that were not active at
+// provisioning time.
+func checkUnauthorizedServices(snapshot []string) []string {
+	return unauthorizedDeviations("svc:unauthorized:", snapshot, listActiveServices)
+}
+
+// splitLines splits command output into non-empty trimmed lines. Shared by
+// every platform: it is pure string handling with nothing platform-specific,
+// and a per-platform copy can only drift (CI builds Linux alone).
+func splitLines(s string) []string {
+	var out []string
+	for _, l := range strings.Split(strings.TrimSpace(s), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
 const secsPerDay = 86400
 
 // CheckResult is the verdict of one manifest verification.

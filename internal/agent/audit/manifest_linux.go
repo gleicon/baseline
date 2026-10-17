@@ -168,50 +168,6 @@ func mapSystemctlState(name, verb, realDeviation, out string, exitCode int) []st
 // checkUnauthorizedPackages reports packages currently installed that were not
 // present at provisioning time. snapshot is the PackageSnapshot from the manifest
 // (populated only when mode: snapshot was used); nil snapshot disables this check.
-func checkUnauthorizedPackages(snapshot []string) []string {
-	if len(snapshot) == 0 {
-		return nil
-	}
-	allowed := make(map[string]bool, len(snapshot))
-	for _, p := range snapshot {
-		allowed[p] = true
-	}
-	current, err := listInstalledPackages()
-	if err != nil {
-		return nil // best-effort; don't raise false drift on package manager absence
-	}
-	var deviations []string
-	for _, p := range current {
-		if !allowed[p] {
-			deviations = append(deviations, fmt.Sprintf("pkg:unauthorized:%s", p))
-		}
-	}
-	return deviations
-}
-
-// checkUnauthorizedServices reports services currently active that were not
-// present at provisioning time.
-func checkUnauthorizedServices(snapshot []string) []string {
-	if len(snapshot) == 0 {
-		return nil
-	}
-	allowed := make(map[string]bool, len(snapshot))
-	for _, s := range snapshot {
-		allowed[s] = true
-	}
-	current, err := listActiveServices()
-	if err != nil {
-		return nil
-	}
-	var deviations []string
-	for _, s := range current {
-		if !allowed[s] {
-			deviations = append(deviations, fmt.Sprintf("svc:unauthorized:%s", s))
-		}
-	}
-	return deviations
-}
-
 func listInstalledPackages() ([]string, error) {
 	out, err := exec.Command("dpkg-query", "-W", "-f=${Package}\n").Output()
 	if err == nil {
@@ -244,14 +200,4 @@ func listActiveServices() ([]string, error) {
 		}
 	}
 	return services, nil
-}
-
-func splitLines(s string) []string {
-	var out []string
-	for _, l := range strings.Split(strings.TrimSpace(s), "\n") {
-		if l = strings.TrimSpace(l); l != "" {
-			out = append(out, l)
-		}
-	}
-	return out
 }
