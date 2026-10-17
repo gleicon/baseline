@@ -407,43 +407,45 @@ func splitCSV(s string) []string {
 	return out
 }
 
-// resolveCheckInputs determines the manifest path, node id, and OTLP endpoint
-// for a check. With -manifest the config is optional and only fills in unset
-// node id / endpoint; without it the manifest must come from the config file.
-func resolveCheckInputs(config_path, manifest_flag, node_flag, otlp_flag string) (string, string, string, error) {
-	manifest_path := manifest_flag
-	node_id := node_flag
-	endpoint := otlp_flag
-
-	if manifest_path != "" {
-		if config_path != "" {
-			if cfg, err := agentcfg.Load(config_path); err == nil {
-				if node_id == "" {
-					node_id = cfg.NodeID
-				}
-				if endpoint == "" {
-					endpoint = cfg.OTLPEndpoint
-				}
-			}
-		}
-	} else if config_path != "" {
-		cfg, err := agentcfg.Load(config_path)
+// resolveCheckConfig builds the effective config for a one-shot check.
+// Flags win over agent.toml; everything the config carries that affects the
+// check itself (check set, fast_scan) is preserved, so -check applies exactly
+// the same comparison the daemon would. With -manifest the config is optional
+// and only fills in what the flags left unset; without it the manifest path
+// must come from the config file.
+func resolveCheckConfig(config_path, manifest_flag, node_flag, otlp_flag string) (*agentcfg.AgentConfig, string, error) {
+	cfg := &agentcfg.AgentConfig{}
+	if config_path != "" {
+		loaded, err := agentcfg.Load(config_path)
 		if err != nil {
-			return "", "", "", fmt.Errorf("load config %q: %w", config_path, err)
-		}
-		manifest_path = cfg.ManifestPath
-		if node_id == "" {
-			node_id = cfg.NodeID
-		}
-		if endpoint == "" {
-			endpoint = cfg.OTLPEndpoint
+			// Without -manifest the config is the only source of a manifest
+			// path, so a broken config is fatal; with it, the check can still
+			// run on flags alone.
+			if manifest_flag == "" {
+				return nil, "", fmt.Errorf("load config %q: %w", config_path, err)
+			}
+		} else {
+			cfg = loaded
 		}
 	}
 
-	if manifest_path == "" {
-		return "", "", "", errors.New("no manifest to check (use -manifest or set manifest_path in config)")
+	if manifest_flag != "" {
+		cfg.ManifestPath = manifest_flag
 	}
-	return manifest_path, node_id, endpoint, nil
+	if node_flag != "" {
+		cfg.NodeID = node_flag
+	}
+	cfg.NodeID = resolveNodeID(cfg.NodeID, "")
+
+	endpoint := otlp_flag
+	if endpoint == "" {
+		endpoint = cfg.OTLPEndpoint
+	}
+
+	if cfg.ManifestPath == "" {
+		return nil, "", errors.New("no manifest to check (use -manifest or set manifest_path in config)")
+	}
+	return cfg, endpoint, nil
 }
 
 // runCheck runs one manifest check, emits it to OTel, and prints the verdict.
@@ -454,19 +456,18 @@ func runCheck(config_path, manifest_flag, format_flag, node_flag, otlp_flag stri
 		return 2
 	}
 
-	manifest_path, node_id, endpoint, err := resolveCheckInputs(config_path, manifest_flag, node_flag, otlp_flag)
+	cfg, endpoint, err := resolveCheckConfig(config_path, manifest_flag, node_flag, otlp_flag)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "agent:", err)
 		return 2
 	}
-	node_id = resolveNodeID(node_id, "")
 
-	result, ok := audit.CheckLocal(manifest_path, node_id)
+	result, ok := audit.RunManifest(cfg)
 	if !ok {
-		if _, statErr := os.Stat(manifest_path); statErr == nil {
+		if _, statErr := os.Stat(cfg.ManifestPath); statErr == nil {
 			// File exists but could not be read — a permission problem, not a
 			// missing manifest.
-			fmt.Fprintf(os.Stderr, "agent: manifest %q exists but could not be read — grant the service user read access (chown/chmod) or run as root\n", manifest_path)
+			fmt.Fprintf(os.Stderr, "agent: manifest %q exists but could not be read — grant the service user read access (chown/chmod) or run as root\n", cfg.ManifestPath)
 			return 2
 		}
 		fmt.Fprintln(os.Stderr, "agent: no manifest to check (use -manifest or set manifest_path in config)")
@@ -474,10 +475,10 @@ func runCheck(config_path, manifest_flag, format_flag, node_flag, otlp_flag stri
 	}
 
 	if remediate {
-		result = runRemediation(manifest_path, node_id, result)
+		result = runRemediation(cfg, result)
 	}
 
-	emitOTel(result, endpoint, node_id)
+	emitOTel(result, endpoint, cfg.NodeID)
 	printResult(result, format_flag)
 
 	switch result.Status {
@@ -495,7 +496,7 @@ func runCheck(config_path, manifest_flag, format_flag, node_flag, otlp_flag stri
 // The enforcement itself lives in the audit package; this is presentation.
 // Returns the post-enforcement verdict, or the pre-enforcement one if the pass
 // could not run.
-func runRemediation(manifest_path, node_id string, before audit.CheckResult) audit.CheckResult {
+func runRemediation(cfg *agentcfg.AgentConfig, before audit.CheckResult) audit.CheckResult {
 	// Big scope warning: remediation only enforces what the manifest snapshot
 	// records (packages + services). Config-management state that the manifest
 	// does not capture (users, cron, firewall, sysctl, …) is untouched and must
@@ -504,13 +505,13 @@ func runRemediation(manifest_path, node_id string, before audit.CheckResult) aud
 	fmt.Println("         It does NOT restore users, cron, firewall, sysctl, or any other state that")
 	fmt.Println("         Ansible/IaC manages — re-running the provisioning playbook is the complete fix.")
 
-	after, rem, err := audit.RemediateLocal(manifest_path, node_id)
-	if !rem.Empty() {
-		fmt.Printf("remediate: %s\n", rem.String())
-	}
+	after, rem, err := audit.RemediateLocal(cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "agent: remediate: %v\n", err)
 		return before
+	}
+	if !rem.Empty() {
+		fmt.Printf("remediate: %s\n", rem.String())
 	}
 	if after.Status == audit.StatusOK {
 		fmt.Println("remediate: manifest now satisfied")

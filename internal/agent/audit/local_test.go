@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestCheckLocalClean(t *testing.T) {
+func TestRunManifestLocalClean(t *testing.T) {
 	dir := t.TempDir()
 	content := []byte("hello local")
 	fpath := filepath.Join(dir, "watched.txt")
@@ -19,16 +19,16 @@ func TestCheckLocalClean(t *testing.T) {
 		Files:         []ManifestFile{{Path: fpath, SHA256: sha256Hex(content)}},
 	})
 
-	p, ok := CheckLocal(mpath, "local-test")
+	p, ok := RunManifest(cfgWithManifest(mpath))
 	if !ok {
-		t.Fatal("CheckLocal: want ok=true")
+		t.Fatal("RunManifest: want ok=true")
 	}
 	if p.Status != "OK" {
 		t.Errorf("status: got %q, want OK", p.Status)
 	}
 }
 
-func TestCheckLocalDrift(t *testing.T) {
+func TestRunManifestLocalDrift(t *testing.T) {
 	dir := t.TempDir()
 	fpath := filepath.Join(dir, "watched.txt")
 	if err := os.WriteFile(fpath, []byte("v1"), 0644); err != nil {
@@ -42,9 +42,9 @@ func TestCheckLocalDrift(t *testing.T) {
 		t.Fatalf("tamper watched file: %v", err)
 	}
 
-	p, ok := CheckLocal(mpath, "local-test")
+	p, ok := RunManifest(cfgWithManifest(mpath))
 	if !ok {
-		t.Fatal("CheckLocal: want ok=true")
+		t.Fatal("RunManifest: want ok=true")
 	}
 	if p.Status != "DRIFT_DETECTED" {
 		t.Errorf("status: got %q, want DRIFT_DETECTED", p.Status)
@@ -54,10 +54,10 @@ func TestCheckLocalDrift(t *testing.T) {
 	}
 }
 
-func TestCheckLocalMissingManifest(t *testing.T) {
-	p, ok := CheckLocal(filepath.Join(t.TempDir(), "nope.json"), "local-test")
+func TestRunManifestLocalMissingManifest(t *testing.T) {
+	p, ok := RunManifest(cfgWithManifest(filepath.Join(t.TempDir(), "nope.json")))
 	if !ok {
-		t.Fatal("CheckLocal: want ok=true even when file is missing")
+		t.Fatal("RunManifest: want ok=true even when file is missing")
 	}
 	if p.Status != "MANIFEST_NOT_FOUND" {
 		t.Errorf("status: got %q, want MANIFEST_NOT_FOUND", p.Status)
@@ -82,7 +82,7 @@ func TestLoadManifestRoundTrip(t *testing.T) {
 // RemediateLocal must surface a missing manifest as an error rather than
 // reporting an empty remediation as success.
 func TestRemediateLocalMissingManifest(t *testing.T) {
-	_, rem, err := RemediateLocal(filepath.Join(t.TempDir(), "missing.json"), "node-1")
+	_, rem, err := RemediateLocal(cfgWithManifest(filepath.Join(t.TempDir(), "missing.json")))
 	if err == nil {
 		t.Fatal("want an error for a missing manifest, got nil")
 	}

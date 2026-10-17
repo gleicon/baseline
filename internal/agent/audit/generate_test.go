@@ -58,13 +58,13 @@ func TestGenerateManifestRoundTrip(t *testing.T) {
 		t.Error("identical regenerate: want changed=false")
 	}
 
-	// Tamper the watched file: CheckLocal must now report drift.
+	// Tamper the watched file: the check must now report drift.
 	if err := os.WriteFile(fpath, []byte("v2"), 0644); err != nil {
 		t.Fatalf("tamper: %v", err)
 	}
-	p, ok := CheckLocal(dest, "gen-test")
+	p, ok := RunManifest(cfgWithManifest(dest))
 	if !ok {
-		t.Fatal("CheckLocal: want ok=true")
+		t.Fatal("RunManifest: want ok=true")
 	}
 	if p.Status != "DRIFT_DETECTED" {
 		t.Errorf("status: got %q, want DRIFT_DETECTED", p.Status)

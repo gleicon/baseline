@@ -82,10 +82,67 @@ func TestRunCheckConfigModeResolution(t *testing.T) {
 	}
 }
 
-func TestResolveCheckInputsRejectsMissingManifest(t *testing.T) {
-	_, _, _, err := resolveCheckInputs("", "", "", "")
+func TestResolveCheckConfigRejectsMissingManifest(t *testing.T) {
+	_, _, err := resolveCheckConfig("", "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "no manifest to check") {
 		t.Fatalf("expected missing-manifest error, got %v", err)
+	}
+}
+
+// A one-shot check must apply the same comparison the daemon would. The check
+// set and fast_scan live in agent.toml, so resolving a check must carry the
+// whole config forward, not just the manifest path and node id. Dropping them
+// made -check report OK on a node the daemon flagged as drifted.
+func TestResolveCheckConfigCarriesCheckSettings(t *testing.T) {
+	manifest, _ := makeManifest(t)
+	path := filepath.Join(t.TempDir(), "agent.toml")
+	body := "[agent]\nmanifest_path = " + quote(manifest) +
+		"\ncheck = [\"sha256\", \"mode\", \"mtime\"]\nfast_scan = true\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, _, err := resolveCheckConfig(path, "", "", "")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if len(cfg.CheckSet) != 3 {
+		t.Errorf("check set must survive resolution: got %v, want 3 attributes", cfg.CheckSet)
+	}
+	if !cfg.FastScan {
+		t.Error("fast_scan must survive resolution, got false")
+	}
+
+	// The same must hold when -manifest is supplied alongside the config.
+	cfg, _, err = resolveCheckConfig(path, manifest, "", "")
+	if err != nil {
+		t.Fatalf("resolve with -manifest: %v", err)
+	}
+	if len(cfg.CheckSet) != 3 || !cfg.FastScan {
+		t.Errorf("-manifest must not discard check settings: checkset=%v fast_scan=%v", cfg.CheckSet, cfg.FastScan)
+	}
+}
+
+// A config that will not parse must stay non-fatal when -manifest supplies
+// the path itself: the check can run on flags alone. Only when the config is
+// the sole source of a manifest path does a broken one abort.
+func TestResolveCheckConfigBrokenConfigTolerated(t *testing.T) {
+	manifest, _ := makeManifest(t)
+	bad := filepath.Join(t.TempDir(), "agent.toml")
+	if err := os.WriteFile(bad, []byte("[agent]\nthis is not = = valid toml\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, _, err := resolveCheckConfig(bad, manifest, "", "")
+	if err != nil {
+		t.Fatalf("-manifest must survive an unparseable config: %v", err)
+	}
+	if cfg.ManifestPath != manifest {
+		t.Errorf("manifest path: got %q, want %q", cfg.ManifestPath, manifest)
+	}
+
+	if _, _, err := resolveCheckConfig(bad, "", "", ""); err == nil {
+		t.Error("an unparseable config with no -manifest must be fatal, got nil")
 	}
 }
 
