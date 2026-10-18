@@ -28,7 +28,21 @@ chmod 0777 "$E2E_DIR/out" 2>/dev/null || true
 rm -f "$OUT"
 
 pass() { echo "PASS: $1"; }
-fail() { echo "FAIL: $1"; exit 1; }
+
+# A failing stage must say why. Without this the suite reports only "no status
+# within 90s", which is true of a crashed agent, an unreachable collector, and
+# an unwritable output directory alike -- three very different problems.
+fail() {
+  echo "FAIL: $1"
+  echo "--- diagnostics ---"
+  echo "output dir:"; ls -la "$E2E_DIR/out" 2>&1 | head -5
+  echo "id in collector container:"; $COMPOSE exec -T otelcol id 2>&1 | head -2
+  echo "telemetry.json: $( [ -f "$OUT" ] && wc -c <"$OUT" || echo MISSING ) bytes"
+  echo "collector logs (tail):"; $COMPOSE logs --tail=25 otelcol 2>&1 | tail -25
+  echo "agent logs (tail):"; $COMPOSE logs --tail=25 agent 2>&1 | tail -25
+  echo "--- end diagnostics ---"
+  exit 1
+}
 
 # $1 = wanted gauge value ("0" or "1"), $2 = timeout seconds, $3 = stage label
 wait_for_status() {
