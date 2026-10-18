@@ -306,3 +306,89 @@ seven test callers pointed at `loadManifest` directly.
 Also folded in: `record.go` repeated the same nine-line "extend the existing
 manifest or start fresh" preamble in `RecordEnd`, `RecordSnapshot` and
 `RecordObserved`; it is now `loadForMerge`.
+
+
+---
+
+# v0.5.0 — enforcement removed, manifest signed
+
+The executive report ranked the open weaknesses. These decisions address the
+critical and high ones, and reverse two earlier decisions in this document.
+
+## 14. Enforcement is removed entirely; baseline detects and suggests
+
+**Question:** Decision 1 cut daemon-mode remediation but kept the one-shot
+`-remediate`. Should that survive?
+
+**Decision:** No. All enforcement is deleted — the flag, `Remediate`,
+`RemediateLocal`, the `Remediation` type, and both platform files. On drift the
+agent now prints the deviations followed by a `what to do:` block naming the
+options for each class.
+
+**Rationale:** The agent cannot know enough to act safely. The Kubernetes
+discussion made this concrete: an "unauthorized" package on a node may be a CNI
+dependency, and stopping an "unauthorized" service may be stopping kubelet.
+Detection and enforcement need different amounts of context, and baseline only
+ever had enough for the first. Removing it also makes the product describable in
+one line — baseline tells you what changed, IaC decides what to do — and
+dissolves weakness #5 (coarse fix path), which stops being a half-built feature
+and becomes a stated boundary.
+
+## 15. The manifest is signed on the node, with the witness off the node
+
+**Question:** Weakness #1, rated critical: the manifest is unsigned and
+node-local, so an attacker with root edits the file and the manifest together
+and the agent reports clean. Where does the signing key live, given the project
+has no controller and should not grow one?
+
+**Decision:** The node generates an ed25519 keypair on first record
+(`signing.key` 0400, `signing.pub` 0444), signs the manifest, and verifies it on
+every check. A signature that does not verify is `CHECK_ERROR` with
+`manifest:signature_invalid`. The manifest digest and signing-key fingerprint
+are emitted to OTel on every check.
+
+**Rationale:** No node-local signing can stop root from signing a lie — that is
+information-theoretic, not a design flaw to engineer around. The achievable
+property is tamper-*evidence*, and that needs only one thing: the evidence must
+reach somewhere the node cannot edit. Baseline already has that pipeline, so the
+off-node witness costs nothing architecturally and keeps the project
+controller-less, which was its differentiator. Tier 0 (local verification)
+catches corruption and careless tampering for free; tier 1 (fingerprint in
+telemetry) catches the thorough attacker who re-keys. TPM-backed keys were
+deliberately deferred: `go-tpm` is a real dependency with heavy platform
+variance, and it raises the cost of key theft rather than changing the property.
+
+Uses `crypto/ed25519` and `crypto/sha256` — no new dependencies.
+
+Implementation note: writing the signature `0444` meant `os.WriteFile` could not
+overwrite it, so re-signing would have failed on every re-provisioning run after
+the first. A test caught it; signing now writes through a temp file and rename,
+which is also atomic against a concurrent check reading a half-written
+signature.
+
+## 16. Exclusions exist; the policy stays with the operator
+
+**Question:** Decision 10 settled weakness #3 with documentation alone, keeping
+the walker policy-free. The report rated it high. Reverse?
+
+**Decision:** Partly. `-exclude` takes glob patterns matching a full path or any
+parent directory, so naming a directory drops its subtree. No built-in list
+ships, and an invalid pattern is an error rather than a silent no-match.
+
+**Rationale:** Decision 10 conflated two things — whether the *mechanism* should
+exist and whether a *default policy* should. Documentation could not give the
+operator a way to act; the flag can. Shipping defaults is still wrong: a default
+that silently stopped tracking `/etc/shadow` would be a worse surprise than a
+noisy first run.
+
+## 17. Cross-compilation is a CI gate
+
+**Question:** Weakness #2: three of four platform paths compile different source
+and CI exercises one.
+
+**Decision:** A `cross-compile` matrix job builds and vets linux/amd64,
+linux/arm64, darwin/arm64, windows/amd64 and freebsd/amd64.
+
+**Rationale:** A break shipped undetected during the previous cycle and was
+caught only by manual cross-compilation. `go build ./...` is not a build check in
+a repository with build tags.

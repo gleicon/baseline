@@ -8,10 +8,11 @@ single binary (`baseline-agent`) and no server side. You provision with Ansible;
 of installed packages and active services) and periodically checks the node
 against it, emitting verdicts and heartbeats over OpenTelemetry to your own
 pipeline. All alerting happens downstream (Prometheus / Grafana). No hub, no
-secrets, no certificates. Detect by default; remediation is an explicit
-one-shot opt-in (`-remediate`, root, no daemon equivalent), and file content is
-always restored by the provisioning playbook (IaS is the source of truth for
-content).
+secrets, no certificates. Baseline detects and reports only: it never changes
+the node. Each verdict names the deviations and suggests the options, and the
+fix is re-running the provisioning playbook (IaS is the source of truth). The
+manifest is signed at record time, and its digest and signing-key fingerprint
+are emitted on every check so tampering is visible off-node.
 
 ## Stack
 
@@ -30,8 +31,8 @@ content).
 
 | Path | Contents |
 |------|----------|
-| `cmd/agent/` | `baseline-agent` entrypoint: check / write-manifest / scan-playbook / remediate flags, daemon loops, OTel wiring |
-| `internal/agent/audit/` | Manifest load/generate/scan/check/remediate (the drift core; linux/darwin split) |
+| `cmd/agent/` | `baseline-agent` entrypoint: check / write-manifest / scan-playbook / record flags, daemon loops, OTel wiring |
+| `internal/agent/audit/` | Manifest load/generate/scan/check/sign (the drift core; linux/darwin split) |
 | `internal/agent/otel/` | OTel Setup + Emit (drift status, details-with-deviations, alive, checks) |
 | `internal/agent/config/` | TOML loader (`manifest_path` required; heartbeat/audit intervals; warns on unknown keys) |
 | `internal/agent/sdnotify/` | Inline sd_notify (no CGO) |
@@ -44,12 +45,15 @@ content).
 ## Constraints
 
 **Safety (non-negotiable):**
+- The agent never changes the node. It has no enforcement path at all: no
+  package removal, no service control, no file writes to managed paths. It
+  reports deviations and suggests options; the operator decides.
 - The daemon and `-check` paths never write the manifest (read-only check);
-  only the explicit `-write-manifest` / `-record-*` modes do. The agent never
-  rewrites host config. Remediation is opt-in and only touches packages &
-  services recorded in the snapshot, never files, and never any state the
-  manifest doesn't capture (users, cron, firewall, sysctl, …).
+  only the explicit `-write-manifest` / `-record-*` modes do.
 - File content is restored exclusively by the provisioning playbook (IaS).
+- The manifest is signed at record time. Signing makes tampering evident, not
+  impossible — the off-node witness is the digest and key fingerprint emitted
+  on every check, not the signature itself.
 
 **Resource (systemd unit on edge nodes):**
 - CPU 10%, memory 256M, IO 512K, `Nice=19`, watchdog 120s.

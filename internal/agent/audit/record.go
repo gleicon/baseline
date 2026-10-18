@@ -22,10 +22,48 @@ type FileAttrs struct {
 // FileIndex maps a file path to its recorded attributes.
 type FileIndex map[string]FileAttrs
 
+// Excluder reports whether a path should be left out of an index. nil means
+// exclude nothing.
+type Excluder func(path string) bool
+
+// NewExcluder compiles shell-glob patterns into an Excluder. A pattern matches
+// either the full path (filepath.Match semantics) or any directory prefix of
+// it, so "/etc/kubernetes/pki" excludes everything beneath it without needing
+// a trailing wildcard. An invalid pattern is an error rather than a silent
+// no-match: a typo that quietly excludes nothing would be worse than refusing.
+func NewExcluder(patterns []string) (Excluder, error) {
+	var compiled []string
+	for _, p := range patterns {
+		if p == "" {
+			continue
+		}
+		if _, err := filepath.Match(p, "/probe"); err != nil {
+			return nil, fmt.Errorf("invalid exclude pattern %q: %w", p, err)
+		}
+		compiled = append(compiled, p)
+	}
+	if len(compiled) == 0 {
+		return nil, nil
+	}
+	return func(path string) bool {
+		for _, p := range compiled {
+			if ok, _ := filepath.Match(p, path); ok {
+				return true
+			}
+			for dir := filepath.Dir(path); len(dir) > 1; dir = filepath.Dir(dir) {
+				if ok, _ := filepath.Match(p, dir); ok {
+					return true
+				}
+			}
+		}
+		return false
+	}, nil
+}
+
 // BuildFileIndex records every regular file under the roots. The walk is
 // sequential; hashing runs on a fixed bounded worker pool. Unreadable files
-// and subtrees are skipped.
-func BuildFileIndex(roots []string) (FileIndex, error) {
+// and subtrees are skipped, as are paths the Excluder rejects.
+func BuildFileIndex(roots []string, exclude Excluder) (FileIndex, error) {
 	type entry struct {
 		path string
 		info fs.FileInfo
@@ -40,6 +78,12 @@ func BuildFileIndex(roots []string) (FileIndex, error) {
 				return nil // skip unreadable subtree
 			}
 			if d.IsDir() {
+				if exclude != nil && exclude(path) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if exclude != nil && exclude(path) {
 				return nil
 			}
 			info, infoErr := d.Info()
@@ -168,8 +212,8 @@ func loadForMerge(manifestPath string, extra int) (Manifest, map[string]Manifest
 }
 
 // RecordBegin saves a pre-run index. Returns the number of files indexed.
-func RecordBegin(indexPath string, roots []string) (int, error) {
-	idx, err := BuildFileIndex(roots)
+func RecordBegin(indexPath string, roots []string, exclude Excluder) (int, error) {
+	idx, err := BuildFileIndex(roots, exclude)
 	if err != nil {
 		return 0, err
 	}
@@ -183,12 +227,12 @@ func RecordBegin(indexPath string, roots []string) (int, error) {
 // changed (the diff between the pre index and a fresh post index) and refreshes
 // the package and service snapshots. Files deleted by the run are removed from
 // tracking. Returns the counts of files added and removed.
-func RecordEnd(manifestPath, indexPath string, roots []string) (added, removed int, err error) {
+func RecordEnd(manifestPath, indexPath string, roots []string, exclude Excluder) (added, removed int, err error) {
 	pre, err := LoadFileIndex(indexPath)
 	if err != nil {
 		return 0, 0, err
 	}
-	post, err := BuildFileIndex(roots)
+	post, err := BuildFileIndex(roots, exclude)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -213,8 +257,8 @@ func RecordEnd(manifestPath, indexPath string, roots []string) (added, removed i
 // roots becomes a tracked manifest entry (no diff). Use it to bootstrap an
 // already-provisioned node, or as a full-state capture. Returns the number of
 // tracked files after the merge.
-func RecordSnapshot(manifestPath string, roots []string) (int, error) {
-	idx, err := BuildFileIndex(roots)
+func RecordSnapshot(manifestPath string, roots []string, exclude Excluder) (int, error) {
+	idx, err := BuildFileIndex(roots, exclude)
 	if err != nil {
 		return 0, err
 	}

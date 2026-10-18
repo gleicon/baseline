@@ -45,7 +45,7 @@ groups:
           severity: warning
         annotations:
           summary: Baseline drift detected on {{ $labels.host_name }}
-          description: "baseline_drift_status=1 on {{ $labels.host_name }}. See the Drifted nodes panel / baseline_drift_details for the exact deviations; re-run the provisioning playbook (IaS) or use -remediate to fix."
+          description: "baseline_drift_status=1 on {{ $labels.host_name }}. See the Drifted nodes panel / baseline_drift_details for the exact deviations; the agent reports what changed and suggests options; re-run the provisioning playbook (IaS) to fix."
 
       - uid: baseline-check-error-alert
         title: Baseline check error

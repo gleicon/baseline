@@ -24,7 +24,7 @@ func benchTree(b *testing.B, n int) string {
 // manifestFromIndex builds a fresh ManifestFile list from a built index.
 func manifestFromIndex(b *testing.B, dir string) []ManifestFile {
 	b.Helper()
-	idx, err := BuildFileIndex([]string{dir})
+	idx, err := BuildFileIndex([]string{dir}, nil)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func BenchmarkBuildFileIndex(b *testing.B) {
 	dir := benchTree(b, 2000)
 	b.ReportAllocs()
 	for b.Loop() {
-		idx, err := BuildFileIndex([]string{dir})
+		idx, err := BuildFileIndex([]string{dir}, nil)
 		if err != nil {
 			b.Fatal(err)
 		}

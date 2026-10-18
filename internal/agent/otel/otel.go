@@ -193,7 +193,10 @@ func (h *Handle) EmitCheck(ctx context.Context, result audit.CheckResult) {
 	// per-status label or Prometheus gets one series per status value. The
 	// label set must stay constant across emits so baseline_drift_status is a
 	// single series.
-	statusAttrs := []attribute.KeyValue{attribute.String("host.name", h.nodeID)}
+	statusAttrs := []attribute.KeyValue{
+		attribute.String("host.name", h.nodeID),
+		attribute.String("manifest_key_fp", result.Trust.KeyFP),
+	}
 	h.status.Record(ctx, driftStatus(result.Status), metric.WithAttributes(statusAttrs...))
 	h.checks.Add(ctx, 1, metric.WithAttributes(attribute.String("host.name", h.nodeID)))
 
@@ -221,6 +224,13 @@ func (h *Handle) EmitCheck(ctx context.Context, result audit.CheckResult) {
 	rec.AddAttributes(
 		attribute.String("host.name", h.nodeID),
 		attribute.String("baseline.status", result.Status),
+		// The off-node tamper witness: a digest or key fingerprint that
+		// changes without a deployment is visible here, in a backend the
+		// node's attacker does not control. See audit/sign.go.
+		attribute.String("baseline.manifest.digest", result.Trust.Digest),
+		attribute.String("baseline.manifest.key_fp", result.Trust.KeyFP),
+		attribute.Bool("baseline.manifest.signed", result.Trust.Signed),
+		attribute.Bool("baseline.manifest.verified", result.Trust.Verified),
 		attribute.StringSlice("baseline.deviations", devs),
 		attribute.Int64("baseline.manifest_generated_at", result.ManifestGeneratedAt),
 	)

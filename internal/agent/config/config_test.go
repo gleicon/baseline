@@ -36,7 +36,7 @@ func TestLoadRequiresManifestPath(t *testing.T) {
 	}
 }
 
-// A key this build no longer honors (remediate was removed with daemon-mode
+// A key this build no longer honors (remediate was removed with enforcement
 // enforcement) must not be fatal: a config that fails to load stops the
 // heartbeat and turns a stale key into a dead-man alert.
 func TestLoadToleratesRetiredKeys(t *testing.T) {

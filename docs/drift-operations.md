@@ -2,10 +2,10 @@
 
 Find out what drifted, fix it, and verify the fix, for one node or a fleet.
 
-Default posture: detect and alert. Nothing is auto-fixed. The standard fix path
-is Infrastructure as Code: re-run your provisioning playbook. Remediation is an
-explicit opt-in (`-remediate`, one-shot, as root), never the default and never a
-daemon setting.
+Baseline detects and reports. It never changes the node — not the files, not
+the packages, not the services. Every check names what deviated and suggests
+the options; the decision and the fix are yours, and the fix path is
+Infrastructure as Code: re-run your provisioning playbook.
 
 ## Golden rule
 
@@ -88,39 +88,88 @@ ansible-playbook ...   # or copy the file back from VCS
 systemctl start --now nginx && systemctl enable nginx        # or stop/disable
 ```
 
-### Authorized auto-remediation (opt-in, off by default)
-
-> Warning: `-remediate` enforces only the packages and
-> services recorded in the manifest snapshot. The manifest is not a complete
-> system-state model. Baseline does not know about and will not touch users,
-> sudoers, SSH keys, cron jobs, firewall rules, sysctl parameters, or any other
-> state Ansible manages. Re-running the provisioning playbook is the only
-> complete remediation. Treat `-remediate` as a package/service tidy-up, never
-> as a substitute for IaS.
-
-```sh
-# removes packages/services not in the snapshot, fixes declared service states.
-# File deviations are still reported; only the playbook can restore content.
-baseline-agent -check -remediate -manifest /etc/baseline/manifest.json
-```
-
-There is no daemon equivalent. The agent's audit loop never remediates: the
-systemd unit runs it as an unprivileged user with no capabilities, so package
-and service enforcement cannot work from there. Remediation is always an
-explicit, root-invoked, one-shot command.
-
 Example flow:
 
 ```sh
 # operator installed vim on a node by hand
 # 1. alert fires; Grafana *Drifted nodes* shows pkg:unauthorized:vim (+ deps)
-# 2. decide: vim was a mistake
-baseline-agent -check -remediate -manifest /etc/baseline/manifest.json
-#    remediate: removed 2 package(s): vim, vim-common
-# 3. verify
+# 2. the check names the options:
+baseline-agent -check -manifest /etc/baseline/manifest.json
+#    DRIFT: 2 deviation(s)
+#      - pkg:unauthorized:vim
+#      - pkg:unauthorized:vim-common
+#    what to do:
+#      · package installed outside the baseline — remove it with your package
+#        manager, or re-run the playbook to adopt it as the new promise
+# 3. decide: vim was a mistake. Remove it yourself, or re-run the play.
+apt-get purge -y vim && apt-get autoremove -y --purge
+# 4. verify
 baseline-agent -check -manifest /etc/baseline/manifest.json      # OK: no drift
 # alert auto-resolves, status 0, history kept
 ```
 
-Fleet-wide, run `-remediate` via `ansible -m command` (as root). Grafana and
-Prometheus show every node's deviations until it is back in compliance.
+Grafana and Prometheus show every node's deviations until it is back in
+compliance.
+
+## Manifest signing
+
+The manifest is the promise. If it can be edited, every verdict derived from it
+is worthless — so the agent signs it at record time and verifies it on every
+check.
+
+```
+/etc/baseline/manifest.json       the promise
+/etc/baseline/manifest.json.sig   detached ed25519 signature (0444)
+/etc/baseline/signing.key         private seed (0400), generated on first record
+/etc/baseline/signing.pub         public key (0444)
+```
+
+A manifest edited without re-signing fails verification. The check reports
+`manifest:signature_invalid:<path>` and exits 2 (`CHECK_ERROR`) rather than
+reporting on a document it cannot trust.
+
+```sh
+baseline-agent -check -manifest /etc/baseline/manifest.json
+# CHECK_ERROR
+#   - manifest:signature_invalid:/etc/baseline/manifest.json
+```
+
+Re-recording the manifest re-signs it, so a normal provisioning run needs no
+extra step.
+
+### What signing does and does not buy you
+
+> **Signing makes tampering evident, not impossible.** Nothing stored on a node
+> can defeat root on that node. An attacker who can edit a tracked file can also
+> edit the manifest, regenerate the signing key, and re-sign. Verification will
+> pass. Do not treat a verified manifest as proof of integrity against a
+> privileged adversary.
+
+What it does buy, in order of how often it matters:
+
+1. **Locally, for free:** a corrupted manifest, or a tracked file edited and the
+   manifest doctored to match without re-signing, now fails loudly. That covers
+   the realistic cases — careless change and accidental corruption.
+2. **Off-node, through telemetry you already run:** every check emits
+   `baseline.manifest.digest` (sha256 of the manifest) and
+   `baseline.manifest.key_fp` (signing-key fingerprint), plus
+   `baseline.manifest.signed` and `baseline.manifest.verified`. A fingerprint
+   that changes without a deployment means the key was regenerated — visible in
+   a backend the attacker on that node does not control. **That off-node
+   witness, not the signature itself, is the security property.**
+
+Alert on it:
+
+```promql
+# the signing key changed on a node — re-keyed, or re-signed by someone else
+changes(baseline_drift_status{manifest_key_fp!=""}[1h]) > 0
+```
+
+Better: record the expected fingerprint per node at deploy time and alert on any
+value that differs.
+
+### Unsigned manifests
+
+A manifest recorded before signing existed has no `.sig`. The agent still checks
+it and reports `baseline.manifest.signed=false` rather than failing — an upgrade
+must not silence a fleet. Re-record to start signing.

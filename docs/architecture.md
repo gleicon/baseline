@@ -13,7 +13,7 @@ baseline-agent -write-manifest (last task)
      │                                 ├─ heartbeat loop → baseline.alive
      │                                 ├─ audit loop → baseline.drift.status
      │                                 ├─   + baseline.drift.details (deviations)
-     │                                 ├─   + remediate (opt-in)
+     │                                 ├─   + manifest digest + signing key fingerprint
      └─ promise ───────────────────→  └─ check log record (baseline.deviations)
                                               │  stdout (default) or OTLP/HTTP
                                               ▼
@@ -28,7 +28,7 @@ baseline-agent -write-manifest (last task)
 |---------|----------------|
 | `cmd/agent` | Flags, OTel setup, signal handling, systemd notify |
 | `internal/agent/config` | `agent.toml` (only `manifest_path` required) |
-| `internal/agent/audit` | Manifest read / check / generate / scan / remediate |
+| `internal/agent/audit` | Manifest read / check / generate / scan / sign |
 | `internal/agent/otel` | OTel providers; gauges, counter, log records |
 | `internal/agent/sdnotify` | Inline sd_notify, no CGO |
 | `internal/assert` | Precondition helper |

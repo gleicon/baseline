@@ -122,7 +122,7 @@
 
     # ── permission alert: when systemctl cannot confirm a state (manager query
     # ── denied / unreachable, rc=4), the agent must alert svc:unverifiable with
-    # ── remediation guidance instead of falsely reporting svc:inactive/svc:disabled
+    # ── guidance instead of falsely reporting svc:inactive/svc:disabled
     - name: Install a fake systemctl that cannot confirm state (rc=4)
       ansible.builtin.copy:
         dest: /usr/local/bin/systemctl

@@ -80,34 +80,85 @@
       ansible.builtin.debug:
         msg: "{{ check_pkg_drift.stdout_lines }}"
 
-    # ── remediation (explicitly authorized, off by default) ─────────────────────
-    # The agent enforces the manifest for packages; file deviations remain the
-    # provisioning playbook's job (IaS is the source of truth for file content).
-    - name: Enforce the manifest with -remediate
+    # ── suggestions + manifest signature ────────────────────────────────────────
+    # Baseline reports and suggests; it never changes the node. The manifest is
+    # signed at record time, so doctoring it to hide drift is itself detected.
+    - name: Check reports deviations with actionable advice
       ansible.builtin.command:
         argv:
           - "{{ baseline_install_dir }}/baseline-agent"
           - "-check"
-          - "-remediate"
           - "-manifest"
           - "{{ manifest_path }}"
-      register: remediated
+      register: advised
       changed_when: false
       failed_when: false
 
-    - name: Assert remediation removed curl but left the file deviation
+    - name: Assert drift is reported and explained, never enforced
       ansible.builtin.assert:
         that:
-          - "'remediate:' in remediated.stdout"
-          - "'pkg:unauthorized:curl' not in remediated.stdout"
-          - "'file:hash_mismatch:/etc/baseline/sentinel' in remediated.stdout"
-        fail_msg: "unexpected remediation result: {{ remediated.stdout }}"
+          - "'what to do:' in advised.stdout"
+          - "'pkg:unauthorized:curl' in advised.stdout"
+          - "'file:hash_mismatch:/etc/baseline/sentinel' in advised.stdout"
+          - "'remediate' not in advised.stdout"
+        fail_msg: "unexpected advisory output: {{ advised.stdout }}"
+
+    - name: Remove the package by hand (the operator's decision, not the agent's)
+      ansible.builtin.command: apt-get remove -y --purge curl
+      changed_when: true
+
+    - name: Doctor the manifest to hide the remaining drift
+      ansible.builtin.shell: |
+        set -eu
+        chmod u+w {{ manifest_path }}
+        python3 - <<'PY'
+        import hashlib, json
+        p = "{{ manifest_path }}"
+        m = json.load(open(p))
+        for f in m["files"]:
+            if f["path"] == "/etc/baseline/sentinel":
+                f["sha256"] = hashlib.sha256(open(f["path"], "rb").read()).hexdigest()
+        json.dump(m, open(p, "w"))
+        PY
+        chmod 0400 {{ manifest_path }}
+      changed_when: true
+
+    - name: Check the doctored manifest
+      ansible.builtin.command:
+        argv:
+          - "{{ baseline_install_dir }}/baseline-agent"
+          - "-check"
+          - "-manifest"
+          - "{{ manifest_path }}"
+      register: tampered
+      changed_when: false
+      failed_when: false
+
+    - name: Assert the signature catches a manifest edited to hide drift
+      ansible.builtin.assert:
+        that:
+          - tampered.rc == 2
+          - "'manifest:signature_invalid' in tampered.stdout"
+        fail_msg: "signature check did not detect the doctored manifest: {{ tampered.stdout }}"
 
     - name: Restore the file baseline (the IaS fix for file deviations)
       ansible.builtin.copy:
         content: "{{ baseline_content }}"
         dest: /etc/baseline/sentinel
         mode: "0644"
+
+    - name: Re-record the manifest over the restored file (re-signs it)
+      ansible.builtin.command:
+        argv:
+          - "{{ baseline_install_dir }}/baseline-agent"
+          - "-write-manifest"
+          - "-manifest"
+          - "{{ manifest_path }}"
+          - "-files"
+          - "/etc/baseline/sentinel"
+          - "-snapshot"
+      changed_when: true
+
 
     - name: Re-run check (expected clean)
       ansible.builtin.command:

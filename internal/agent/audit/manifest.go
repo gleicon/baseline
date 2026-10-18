@@ -3,6 +3,7 @@ package audit
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,49 +28,6 @@ const (
 // within this window. The check is advisory (stderr); it never changes
 // the OK/DRIFT verdict.
 const ManifestStaleDays = 90
-
-// Remediation summarizes what one manifest-enforcement pass changed.
-// Auto-remediation is NEVER on by default: it only runs when explicitly
-// authorized it with -remediate. There is no daemon equivalent. Files are
-// intentionally not in the agent's remediation scope — restoring file content
-// is the provisioning playbook's job (IaS is the source of truth for content).
-type Remediation struct {
-	PackagesRemoved  []string
-	ServicesStarted  []string
-	ServicesStopped  []string
-	ServicesEnabled  []string
-	ServicesDisabled []string
-}
-
-// Empty reports whether the remediation pass made no changes.
-func (r Remediation) Empty() bool {
-	return len(r.PackagesRemoved) == 0 &&
-		len(r.ServicesStarted) == 0 &&
-		len(r.ServicesStopped) == 0 &&
-		len(r.ServicesEnabled) == 0 &&
-		len(r.ServicesDisabled) == 0
-}
-
-// String renders the remediation as a single human-readable line.
-func (r Remediation) String() string {
-	var parts []string
-	if n := len(r.PackagesRemoved); n > 0 {
-		parts = append(parts, fmt.Sprintf("removed %d package(s): %s", n, strings.Join(r.PackagesRemoved, ", ")))
-	}
-	if n := len(r.ServicesStarted); n > 0 {
-		parts = append(parts, fmt.Sprintf("started %d service(s): %s", n, strings.Join(r.ServicesStarted, ", ")))
-	}
-	if n := len(r.ServicesStopped); n > 0 {
-		parts = append(parts, fmt.Sprintf("stopped %d service(s): %s", n, strings.Join(r.ServicesStopped, ", ")))
-	}
-	if n := len(r.ServicesEnabled); n > 0 {
-		parts = append(parts, fmt.Sprintf("enabled %d service(s): %s", n, strings.Join(r.ServicesEnabled, ", ")))
-	}
-	if n := len(r.ServicesDisabled); n > 0 {
-		parts = append(parts, fmt.Sprintf("disabled %d service(s): %s", n, strings.Join(r.ServicesDisabled, ", ")))
-	}
-	return strings.Join(parts, "; ")
-}
 
 // unauthorizedSet returns the elements of current that are not in allowed.
 func unauthorizedSet(allowed, current []string) []string {
@@ -146,6 +104,11 @@ type CheckResult struct {
 	FilesChecked    int
 	PackagesChecked int
 	ServicesChecked int
+
+	// Integrity of the manifest itself. Digest and KeyFP are emitted to the
+	// OTel pipeline on every check: a change without a deployment is the
+	// off-node tamper signal (see sign.go).
+	Trust ManifestTrust
 }
 
 // Timestamp returns the check time as a time.Time.
@@ -228,13 +191,30 @@ func RunManifest(cfg *agentcfg.AgentConfig) (CheckResult, bool) {
 		result.Status = StatusManifestNotFound
 		return result, true
 	}
-	return CheckManifest(m, cfg), true
+
+	// Establish what the manifest's own integrity looks like before trusting
+	// anything it says. An unsigned manifest still gets checked — manifests
+	// predating signing have no signature, and failing closed on upgrade would
+	// silence a whole fleet — but a signature that does not verify is drift of
+	// the most serious kind.
+	trust, trustErr := VerifyManifestFile(cfg.ManifestPath)
+	checked := CheckManifest(m, cfg)
+	checked.Trust = trust
+	switch {
+	case trustErr != nil && !errors.Is(trustErr, ErrNoSignature):
+		checked.Deviations = append([]string{"manifest:unverifiable:" + trustErr.Error()}, checked.Deviations...)
+		checked.Status = StatusCheckError
+	case trust.Signed && !trust.Verified:
+		checked.Deviations = append([]string{"manifest:signature_invalid:" + cfg.ManifestPath}, checked.Deviations...)
+		checked.Status = StatusCheckError
+	}
+	return checked, true
 }
 
 // CheckManifest verifies live system state against an already-loaded manifest.
 // It is the whole of the check: RunManifest is this plus reading the file, and
-// callers that already hold the manifest (a remediation pass re-checking its
-// own work) use this directly rather than parsing the same file twice.
+// callers that already hold the manifest use this directly rather than
+// parsing the same file twice.
 func CheckManifest(m Manifest, cfg *agentcfg.AgentConfig) CheckResult {
 	assert.True(cfg != nil, "cfg must not be nil")
 	assert.True(cfg.NodeID != "", "node_id must not be empty")

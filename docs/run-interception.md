@@ -93,12 +93,32 @@ baseline-agent -record-snapshot -manifest /etc/baseline/manifest.json \
   -dirs /etc/nginx,/etc/ssh,/opt/app
 ```
 
-> **Do not snapshot all of `/etc`.** There is no exclusion list — every regular
-> file under a root is tracked. Several files under `/etc` are rewritten by the
-> machine itself and become permanent drift that no playbook run can fix:
-> `resolv.conf` (DHCP), `ld.so.cache` (any package install), `adjtime` (clock
-> sync), `shadow` (any password change). The only way out is re-recording, which
-> adopts every *other* deviation at the same time. Keep the roots narrow.
+> **Prefer narrow roots to broad ones.** Several files under `/etc` are
+> rewritten by the machine itself and become permanent drift that no playbook
+> run can fix: `resolv.conf` (DHCP), `ld.so.cache` (any package install),
+> `adjtime` (clock sync), `shadow` (any password change). Re-recording is the
+> only way out, and it adopts every *other* deviation at the same time.
+
+When a broad root is genuinely what you want, `-exclude` takes glob patterns.
+A pattern matches a full path or any parent directory, so naming a directory
+drops its whole subtree:
+
+```sh
+baseline-agent -record-snapshot -manifest /etc/baseline/manifest.json \
+  -dirs /etc \
+  -exclude '/etc/resolv.conf,/etc/ld.so.cache,/etc/adjtime,/etc/mtab,/etc/shadow,/etc/gshadow,/etc/machine-id,/etc/ssl/private'
+```
+
+There is no built-in exclusion list, and that is deliberate: a default that
+silently stopped tracking `/etc/shadow` would be a worse surprise than a noisy
+first run. The policy is yours to state. An invalid pattern is an error rather
+than a silent no-match, so a typo cannot quietly disable an exclusion.
+
+On Kubernetes nodes the same rule applies with different paths — track
+`/etc/kubernetes`, `/etc/containerd` and `/etc/cni/net.d`, and exclude the
+rotating certificate material under `/etc/kubernetes/pki` and
+`/var/lib/kubelet/pki`, which rotates on its own schedule and would otherwise
+report `file:missing:` after every renewal.
 
 With narrow roots this is the day-one bootstrap: install the agent, snapshot
 once, and the node is tracked from then on.

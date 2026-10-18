@@ -42,7 +42,7 @@ deviations.
 |-|-|
 | [docs/development.md](docs/development.md) | Flags, config, OTel signals, E2E |
 | [docs/run-interception.md](docs/run-interception.md) | Record what any provisioning run changes; no recipe parsing |
-| [docs/drift-operations.md](docs/drift-operations.md) | Find/fix drift, fleet queries, remediation |
+| [docs/drift-operations.md](docs/drift-operations.md) | Find and fix drift, fleet queries, manifest signing |
 | [docs/architecture.md](docs/architecture.md) | Components and data flows |
 | [docs/otel-prometheus-grafana.md](docs/otel-prometheus-grafana.md) | Live observability stack and how to build your own |
 | [Role README](ansible/collections/baseline/fleet/roles/agent/README.md) | Ansible install and variables |

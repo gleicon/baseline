@@ -53,13 +53,13 @@ func main() {
 	snapshot_flag := flag.Bool("snapshot", false, "write-manifest: also record full installed-package and active-service lists")
 	scan_flag := flag.String("scan-playbook", "", "comma-separated playbook paths to scan for managed files (feeds -write-manifest, or prints the list alone)")
 	otlp_flag := flag.String("otlp-endpoint", "", "OTLP/HTTP endpoint (default: OTEL_EXPORTER_OTLP_ENDPOINT env, else stdout)")
-	remediate_flag := flag.Bool("remediate", false, "enforce the manifest (remove unauthorized packages/services, fix declared service states). WARNING: this covers ONLY the packages & services recorded in the manifest snapshot — it does NOT restore users, cron, firewall, sysctl, or any other state that Ansible/IaC manages. OFF by default; re-running the provisioning playbook is the only complete fix. Files are never auto-restored.")
 	record_begin := flag.Bool("record-begin", false, "record: index the file tree under -dirs into -data before a change window")
 	record_end := flag.Bool("record-end", false, "record: diff -data against a fresh index and merge the changed files into -manifest (the node inventory)")
 	record_snapshot := flag.Bool("record-snapshot", false, "record: track every file under -dirs as a baseline (no diff); bootstrap an existing node")
 	record_observed := flag.Bool("record-observed", false, "record: merge a controller-captured file set (-data, see the baseline_capture callback) into -manifest")
 	data_flag := flag.String("data", "", "record: index path (record-begin writes it, record-end reads it)")
 	dirs_flag := flag.String("dirs", "", "record: comma-separated root dirs to index")
+	exclude_flag := flag.String("exclude", "", "record: comma-separated glob patterns to skip (matches a full path or any parent directory), e.g. /etc/kubernetes/pki,/etc/ssl/private")
 	flag.Parse()
 
 	if *check_mode && *write_manifest {
@@ -77,22 +77,43 @@ func main() {
 		os.Exit(2)
 	}
 	if *record_begin {
-		os.Exit(runRecordBegin(*data_flag, *dirs_flag))
+		os.Exit(runRecordBegin(*data_flag, *dirs_flag, *exclude_flag))
 	}
 	if *record_end {
-		os.Exit(runRecordEnd(*manifest_flag, *data_flag, *dirs_flag))
+		os.Exit(runRecordEnd(*manifest_flag, *data_flag, *dirs_flag, *exclude_flag))
 	}
 	if *record_snapshot {
-		os.Exit(runRecordSnapshot(*manifest_flag, *dirs_flag))
+		os.Exit(runRecordSnapshot(*manifest_flag, *dirs_flag, *exclude_flag))
 	}
 	if *record_observed {
 		os.Exit(runRecordObserved(*manifest_flag, *data_flag))
 	}
 	if *check_mode {
-		os.Exit(runCheck(*config_path, *manifest_flag, *format_flag, *node_flag, *otlp_flag, *remediate_flag))
+		os.Exit(runCheck(*config_path, *manifest_flag, *format_flag, *node_flag, *otlp_flag))
 	}
 
 	os.Exit(runDaemon(*config_path, *node_flag, *otlp_flag))
+}
+
+// buildExcluder compiles the -exclude patterns, or fails the run on a bad
+// pattern. A typo that silently excluded nothing would be worse than refusing.
+func buildExcluder(exclude_flag string) (audit.Excluder, bool) {
+	ex, err := audit.NewExcluder(splitCSV(exclude_flag))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent: %v\n", err)
+		return nil, false
+	}
+	return ex, true
+}
+
+// signWritten signs a manifest just written, so the next check can tell that
+// the document is the one this run produced. A signing failure is reported but
+// does not fail the write: an unsigned manifest still detects drift, and a
+// provisioning run must not abort because key material could not be written.
+func signWritten(manifest_path string) {
+	if err := audit.SignManifestFile(manifest_path); err != nil {
+		fmt.Fprintf(os.Stderr, "agent: warning: manifest written but not signed: %v\n", err)
+	}
 }
 
 // resolveNodeID returns the effective node id: flag, config, hostname, fallback.
@@ -248,7 +269,7 @@ func runErrorLoop(ctx context.Context, cfg *agentcfg.AgentConfig, otel *agentote
 	}
 }
 
-// manifestPermissionHint returns a remediation hint when the probe error is a
+// manifestPermissionHint returns an actionable hint when the probe error is a
 // permission problem, so operators know no OS change is required beyond fixing
 // manifest ownership (or granting D-Bus access for service checks).
 func manifestPermissionHint(err error) string {
@@ -325,6 +346,7 @@ func runWriteManifest(dest, files_flag, packages_flag, services_flag, settings_f
 		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 	}
 	if changed {
+		signWritten(dest)
 		fmt.Printf("wrote %s (changed, files=%d packages=%d services=%d settings=%d)\n", dest, len(files), len(pkgs), len(services), len(settings))
 	} else {
 		fmt.Printf("unchanged %s (files=%d packages=%d services=%d settings=%d)\n", dest, len(files), len(pkgs), len(services), len(settings))
@@ -333,13 +355,17 @@ func runWriteManifest(dest, files_flag, packages_flag, services_flag, settings_f
 }
 
 // runRecordBegin saves a file index of the roots before a provisioning run.
-func runRecordBegin(data_flag, dirs_flag string) int {
+func runRecordBegin(data_flag, dirs_flag, exclude_flag string) int {
 	roots := splitCSV(dirs_flag)
 	if data_flag == "" || len(roots) == 0 {
 		fmt.Fprintln(os.Stderr, "agent: -record-begin needs -data <index> and -dirs <roots>")
 		return 2
 	}
-	n, err := audit.RecordBegin(data_flag, roots)
+	exclude, ok := buildExcluder(exclude_flag)
+	if !ok {
+		return 2
+	}
+	n, err := audit.RecordBegin(data_flag, roots, exclude)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "agent: record-begin: %v\n", err)
 		return 2
@@ -351,33 +377,43 @@ func runRecordBegin(data_flag, dirs_flag string) int {
 // runRecordEnd diffs the pre-run index against the current file tree, merges
 // the changed files into the manifest, and refreshes the package/service
 // snapshots. The result is the node inventory for that change window.
-func runRecordEnd(manifest_flag, data_flag, dirs_flag string) int {
+func runRecordEnd(manifest_flag, data_flag, dirs_flag, exclude_flag string) int {
 	roots := splitCSV(dirs_flag)
 	if manifest_flag == "" || data_flag == "" || len(roots) == 0 {
 		fmt.Fprintln(os.Stderr, "agent: -record-end needs -manifest <path>, -data <index>, and -dirs <roots>")
 		return 2
 	}
-	added, removed, err := audit.RecordEnd(manifest_flag, data_flag, roots)
+	exclude, ok := buildExcluder(exclude_flag)
+	if !ok {
+		return 2
+	}
+	added, removed, err := audit.RecordEnd(manifest_flag, data_flag, roots, exclude)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "agent: record-end: %v\n", err)
 		return 2
 	}
+	signWritten(manifest_flag)
 	fmt.Printf("wrote %s (files added=%d removed=%d)\n", manifest_flag, added, removed)
 	return 0
 }
 
 // runRecordSnapshot tracks every file under the roots as a baseline.
-func runRecordSnapshot(manifest_flag, dirs_flag string) int {
+func runRecordSnapshot(manifest_flag, dirs_flag, exclude_flag string) int {
 	roots := splitCSV(dirs_flag)
 	if manifest_flag == "" || len(roots) == 0 {
 		fmt.Fprintln(os.Stderr, "agent: -record-snapshot needs -manifest <path> and -dirs <roots>")
 		return 2
 	}
-	n, err := audit.RecordSnapshot(manifest_flag, roots)
+	exclude, ok := buildExcluder(exclude_flag)
+	if !ok {
+		return 2
+	}
+	n, err := audit.RecordSnapshot(manifest_flag, roots, exclude)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "agent: record-snapshot: %v\n", err)
 		return 2
 	}
+	signWritten(manifest_flag)
 	fmt.Printf("wrote %s (files=%d)\n", manifest_flag, n)
 	return 0
 }
@@ -393,6 +429,7 @@ func runRecordObserved(manifest_flag, data_flag string) int {
 		fmt.Fprintf(os.Stderr, "agent: record-observed: %v\n", err)
 		return 2
 	}
+	signWritten(manifest_flag)
 	fmt.Printf("wrote %s (files=%d)\n", manifest_flag, n)
 	return 0
 }
@@ -450,7 +487,7 @@ func resolveCheckConfig(config_path, manifest_flag, node_flag, otlp_flag string)
 
 // runCheck runs one manifest check, emits it to OTel, and prints the verdict.
 // Exit codes: 0 = no drift, 1 = drift detected, 2 = usage/config/operational error.
-func runCheck(config_path, manifest_flag, format_flag, node_flag, otlp_flag string, remediate bool) int {
+func runCheck(config_path, manifest_flag, format_flag, node_flag, otlp_flag string) int {
 	if format_flag != "text" && format_flag != "json" {
 		fmt.Fprintf(os.Stderr, "agent: -format must be text or json, got %q\n", format_flag)
 		return 2
@@ -474,10 +511,6 @@ func runCheck(config_path, manifest_flag, format_flag, node_flag, otlp_flag stri
 		return 2
 	}
 
-	if remediate {
-		result = runRemediation(cfg, result)
-	}
-
 	emitOTel(result, endpoint, cfg.NodeID)
 	printResult(result, format_flag)
 
@@ -489,40 +522,6 @@ func runCheck(config_path, manifest_flag, format_flag, node_flag, otlp_flag stri
 	default:
 		return 2
 	}
-}
-
-// runRemediation reports an explicitly authorized enforcement pass: the scope
-// warning, what changed, and what the operator still has to fix themselves.
-// The enforcement itself lives in the audit package; this is presentation.
-// Returns the post-enforcement verdict, or the pre-enforcement one if the pass
-// could not run.
-func runRemediation(cfg *agentcfg.AgentConfig, before audit.CheckResult) audit.CheckResult {
-	// Big scope warning: remediation only enforces what the manifest snapshot
-	// records (packages + services). Config-management state that the manifest
-	// does not capture (users, cron, firewall, sysctl, …) is untouched and must
-	// be restored by re-running the provisioning playbook (IaS).
-	fmt.Println("WARNING: remediation enforces ONLY packages & services recorded in the manifest snapshot.")
-	fmt.Println("         It does NOT restore users, cron, firewall, sysctl, or any other state that")
-	fmt.Println("         Ansible/IaC manages — re-running the provisioning playbook is the complete fix.")
-
-	after, rem, err := audit.RemediateLocal(cfg)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "agent: remediate: %v\n", err)
-		return before
-	}
-	if !rem.Empty() {
-		fmt.Printf("remediate: %s\n", rem.String())
-	}
-	if after.Status == audit.StatusOK {
-		fmt.Println("remediate: manifest now satisfied")
-	}
-	for _, d := range after.Deviations {
-		if strings.HasPrefix(d, "file:") {
-			fmt.Println("remediate: file deviations remain — restore file content by re-running the provisioning playbook (IaS)")
-			break
-		}
-	}
-	return after
 }
 
 // emitOTel sends one check verdict to the OTel pipeline. Failures are logged
@@ -569,9 +568,25 @@ func printResult(result audit.CheckResult, format_flag string) {
 	case audit.StatusDriftDetected:
 		fmt.Printf("DRIFT: %d deviation(s)\n", len(result.Deviations))
 		printDeviations(result.Deviations)
+		printSuggestions(result.Deviations)
 	default:
 		fmt.Printf("%s\n", result.Status)
 		printDeviations(result.Deviations)
+		printSuggestions(result.Deviations)
+	}
+}
+
+// printSuggestions names the options for each class of deviation found.
+// Baseline never changes the node, so every verdict ends in a human decision;
+// the agent's job is to make that decision cheap, not to make it for them.
+func printSuggestions(devs []string) {
+	advice := audit.Suggestions(devs)
+	if len(advice) == 0 {
+		return
+	}
+	fmt.Println("\nwhat to do:")
+	for _, a := range advice {
+		fmt.Printf("  · %s\n", a)
 	}
 }
 

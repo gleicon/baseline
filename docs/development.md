@@ -22,7 +22,7 @@ the VM dev loop (`brew install lima`); on Linux no VM is needed.
 | `-node-id ID` | Report label (default: hostname) |
 | `-config PATH` | Agent TOML (`manifest_path` is the only required field) |
 | `-otlp-endpoint URL` | OTLP/HTTP receiver (default: `OTEL_EXPORTER_OTLP_ENDPOINT` env, else stdout) |
-| `-remediate` | With `-check`: enforce the manifest (remove unauthorized packages/services, fix declared service states). Needs root. One-shot only — there is no daemon equivalent. The standard fix is re-running the provisioning playbook. Files are never auto-restored. |
+| `-exclude a,b` | `record`: glob patterns to skip. Matches a full path or any parent directory, so `/etc/kubernetes/pki` drops that whole subtree. An invalid pattern is an error, never a silent no-match |
 | `-record-begin` | Index the file tree under `-dirs` into `-data` before a change window |
 | `-record-end` | Diff `-data` against a fresh index and merge the changed files into `-manifest` (the node inventory) |
 | `-record-snapshot` | Track every file under `-dirs` as a baseline (no diff); bootstrap an already-provisioned node |
@@ -111,7 +111,7 @@ All suites run in Docker with no host or VM changes.
 | Target | What it runs |
 |--------|--------------|
 | `make e2e` | Agent daemon to OTel collector; clean, file drift, package drift, restore |
-| `make e2e-ansible` | Provision a throwaway container with Ansible (`-write-manifest`, snapshot, `-remediate`), scan-playbook, record interception, settings (sysctl/modules/sysctl:all), drift, restore |
+| `make e2e-ansible` | Provision a throwaway container with Ansible (`-write-manifest`, snapshot), scan-playbook, record interception, settings (sysctl/modules/sysctl:all), drift, suggestions, manifest-signature tamper detection, restore |
 | `make e2e-systemd` | The `baseline.fleet.agent` role in a real systemd container; service and file drift, permission alert |
 | `make e2e-live` | Daemon to collector to Prometheus to Grafana; leaves the stack running (tear down with `make e2e-live-down`) |
 | `make e2e-live-webhook` | Optional listener for the live stack; prints Grafana alert notifications as they fire |

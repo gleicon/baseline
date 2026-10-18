@@ -28,7 +28,7 @@ func TestBuildFileIndex(t *testing.T) {
 	writeTempFile(t, filepath.Join(dir, "a.conf"), "a=1\n", time.Time{})
 	writeTempFile(t, filepath.Join(dir, "nested", "b.conf"), "b=2\n", time.Time{})
 
-	idx, err := BuildFileIndex([]string{dir})
+	idx, err := BuildFileIndex([]string{dir}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestDiffIndexes(t *testing.T) {
 	mk("a.conf", "a=1\n")
 	mk("gone.conf", "gone\n")
 
-	before, err := BuildFileIndex([]string{dir})
+	before, err := BuildFileIndex([]string{dir}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestDiffIndexes(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "gone.conf")); err != nil {
 		t.Fatal(err)
 	}
-	after, err := BuildFileIndex([]string{dir})
+	after, err := BuildFileIndex([]string{dir}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestRecordBeginEnd(t *testing.T) {
 
 	writeTempFile(t, filepath.Join(confDir, "a.conf"), "a=1\n", time.Time{})
 	writeTempFile(t, filepath.Join(confDir, "c.conf"), "c=1\n", time.Time{})
-	n, err := RecordBegin(index, []string{confDir})
+	n, err := RecordBegin(index, []string{confDir}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestRecordBeginEnd(t *testing.T) {
 	if err := os.Remove(filepath.Join(confDir, "c.conf")); err != nil {
 		t.Fatal(err)
 	}
-	added, removed, err := RecordEnd(manifest, index, []string{confDir})
+	added, removed, err := RecordEnd(manifest, index, []string{confDir}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,10 +130,10 @@ func TestRecordBeginEnd(t *testing.T) {
 	}
 
 	// An idempotent re-run (fresh begin, no changes) produces no delta.
-	if _, err := RecordBegin(index, []string{confDir}); err != nil {
+	if _, err := RecordBegin(index, []string{confDir}, nil); err != nil {
 		t.Fatal(err)
 	}
-	added2, removed2, err := RecordEnd(manifest, index, []string{confDir})
+	added2, removed2, err := RecordEnd(manifest, index, []string{confDir}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestRecordSnapshotBootstrap(t *testing.T) {
 	writeTempFile(t, filepath.Join(conf, "a.conf"), "a=1\n", time.Time{})
 	writeTempFile(t, filepath.Join(conf, "b.conf"), "b=2\n", time.Time{})
 
-	n, err := RecordSnapshot(manifest, []string{conf})
+	n, err := RecordSnapshot(manifest, []string{conf}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,5 +294,47 @@ func TestRecordObservedMerge(t *testing.T) {
 	}
 	if n2 != 1 {
 		t.Fatalf("missing node file must not be promised, tracked=%d", n2)
+	}
+}
+
+// The exclusion mechanism exists so an operator can keep machine-churned paths
+// out of a snapshot without the walker carrying any built-in policy.
+func TestExcluderSkipsPathsAndSubtrees(t *testing.T) {
+	dir := t.TempDir()
+	keep := filepath.Join(dir, "keep.conf")
+	pkiDir := filepath.Join(dir, "pki")
+	if err := os.MkdirAll(pkiDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{keep, filepath.Join(pkiDir, "server.key")} {
+		if err := os.WriteFile(f, []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ex, err := NewExcluder([]string{pkiDir})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	idx, err := BuildFileIndex([]string{dir}, ex)
+	if err != nil {
+		t.Fatalf("index: %v", err)
+	}
+	if _, ok := idx[keep]; !ok {
+		t.Error("a non-excluded file must still be indexed")
+	}
+	if _, ok := idx[filepath.Join(pkiDir, "server.key")]; ok {
+		t.Error("excluding a directory must exclude everything beneath it")
+	}
+}
+
+// A typo that silently excluded nothing would be worse than refusing to run.
+func TestExcluderRejectsBadPattern(t *testing.T) {
+	if _, err := NewExcluder([]string{"[unclosed"}); err == nil {
+		t.Fatal("an invalid glob must be an error, not a silent no-match")
+	}
+	ex, err := NewExcluder(nil)
+	if err != nil || ex != nil {
+		t.Fatalf("no patterns means no excluder: %v %v", ex, err)
 	}
 }

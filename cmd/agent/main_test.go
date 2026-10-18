@@ -27,25 +27,25 @@ func makeManifest(t *testing.T) (manifest, sentinel string) {
 func TestRunCheckExitCodes(t *testing.T) {
 	manifest, sentinel := makeManifest(t)
 
-	if got := runCheck("", manifest, "text", "test-node", "", false); got != 0 {
+	if got := runCheck("", manifest, "text", "test-node", ""); got != 0 {
 		t.Fatalf("clean manifest: expected exit 0, got %d", got)
 	}
 
 	if err := os.WriteFile(sentinel, []byte("tampered\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := runCheck("", manifest, "text", "test-node", "", false); got != 1 {
+	if got := runCheck("", manifest, "text", "test-node", ""); got != 1 {
 		t.Fatalf("drifted manifest: expected exit 1, got %d", got)
 	}
 }
 
 func TestRunCheckUsageErrors(t *testing.T) {
-	if got := runCheck("", "unused", "xml", "n", "", false); got != 2 {
+	if got := runCheck("", "unused", "xml", "n", ""); got != 2 {
 		t.Fatalf("invalid format: expected exit 2, got %d", got)
 	}
 
 	missing := filepath.Join(t.TempDir(), "nope.json")
-	if got := runCheck("", missing, "text", "n", "", false); got != 2 {
+	if got := runCheck("", missing, "text", "n", ""); got != 2 {
 		t.Fatalf("missing manifest: expected exit 2, got %d", got)
 	}
 
@@ -54,7 +54,7 @@ func TestRunCheckUsageErrors(t *testing.T) {
 	if err := os.WriteFile(cfgMissing, []byte("[agent]\nmanifest_path = \"/does/not/exist.json\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := runCheck(cfgMissing, "", "text", "n", "", false); got != 2 {
+	if got := runCheck(cfgMissing, "", "text", "n", ""); got != 2 {
 		t.Fatalf("config-mode missing manifest: expected exit 2, got %d", got)
 	}
 }
@@ -68,7 +68,7 @@ func TestRunCheckConfigModeResolution(t *testing.T) {
 	}
 
 	// No -manifest: the config supplies manifest_path and node id.
-	if got := runCheck(cfg, "", "text", "", "", false); got != 0 {
+	if got := runCheck(cfg, "", "text", "", ""); got != 0 {
 		t.Fatalf("config-mode clean manifest: expected exit 0, got %d", got)
 	}
 
@@ -77,7 +77,7 @@ func TestRunCheckConfigModeResolution(t *testing.T) {
 	if _, _, err := audit.GenerateManifest(other, nil, nil, nil, nil, false); err != nil {
 		t.Fatal(err)
 	}
-	if got := runCheck(cfg, other, "text", "", "", false); got != 0 {
+	if got := runCheck(cfg, other, "text", "", ""); got != 0 {
 		t.Fatalf("flag-mode clean manifest: expected exit 0, got %d", got)
 	}
 }

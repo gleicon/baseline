@@ -7,5 +7,5 @@ audit_jitter_max_sec  = {{ baseline_audit_jitter_max_sec }}
 {% if baseline_otlp_endpoint is defined and baseline_otlp_endpoint %}
 otlp_endpoint         = "{{ baseline_otlp_endpoint }}"
 {% endif %}
-# Remediation is not a daemon setting. Run it one-shot, as root:
-#   baseline-agent -check -remediate -manifest {{ baseline_manifest_path }}
+# Baseline detects and reports; it never changes this node. Drift is fixed by
+# re-running the provisioning playbook (IaS owns the desired state).

@@ -78,15 +78,3 @@ func TestLoadManifestRoundTrip(t *testing.T) {
 		t.Error("loadManifest missing: want error, got nil")
 	}
 }
-
-// RemediateLocal must surface a missing manifest as an error rather than
-// reporting an empty remediation as success.
-func TestRemediateLocalMissingManifest(t *testing.T) {
-	_, rem, err := RemediateLocal(cfgWithManifest(filepath.Join(t.TempDir(), "missing.json")))
-	if err == nil {
-		t.Fatal("want an error for a missing manifest, got nil")
-	}
-	if !rem.Empty() {
-		t.Fatalf("nothing can be remediated from a manifest that will not load, got %+v", rem)
-	}
-}

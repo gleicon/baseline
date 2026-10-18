@@ -41,11 +41,8 @@ If it matters, promise it.
 ## Usage
 
 See the [`agent` role README](roles/agent/README.md) for the variable reference
-and a worked example. Remediation is not a daemon setting — run it one-shot, as
-root, when you have decided the current state is wrong:
+and a worked example.
 
-```sh
-baseline-agent -check -remediate -manifest /etc/baseline/manifest.json
-```
-
-The complete fix for drift is always re-running the provisioning playbook.
+Baseline detects and reports; it never changes the node. Each check names the
+deviations and suggests the options, and the fix for drift is re-running the
+provisioning playbook — infrastructure-as-code owns the desired state.
