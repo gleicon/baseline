@@ -21,6 +21,11 @@ PROJECT="baseline-observe"
 export DOCKER_API_VERSION="${DOCKER_API_VERSION:-1.44}"
 COMPOSE="docker compose -p $PROJECT -f $E2E_DIR/docker-compose.yml -f $E2E_DIR/docker-compose.observe.yml"
 
+# Same collector-uid constraint as e2e/run.sh: the output directory must be
+# writable by UID 10001 or the file exporter silently produces nothing.
+mkdir -p "$REPO_ROOT/e2e/out"
+chmod 0777 "$REPO_ROOT/e2e/out" 2>/dev/null || true
+
 pass() { echo "PASS: $1"; }
 fail() { echo "FAIL: $1"; exit 1; }
 

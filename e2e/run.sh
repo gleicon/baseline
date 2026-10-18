@@ -16,6 +16,17 @@ else
   COMPOSE="docker compose -f $E2E_DIR/docker-compose.yml"
 fi
 
+# The collector image runs as UID 10001. On Linux the bind mount preserves real
+# uids, so a directory owned by the host user at 0755 is unwritable to it and
+# telemetry.json is never created -- every assertion then times out. On macOS
+# the Docker Desktop mount maps all access to the host user and hides this, so
+# the suite passed locally and failed on Linux CI for a long time. Make the
+# output directory writable before anything starts, and begin from a clean
+# file so no stage can pass on a previous run's telemetry.
+mkdir -p "$E2E_DIR/out"
+chmod 0777 "$E2E_DIR/out" 2>/dev/null || true
+rm -f "$OUT"
+
 pass() { echo "PASS: $1"; }
 fail() { echo "FAIL: $1"; exit 1; }
 
