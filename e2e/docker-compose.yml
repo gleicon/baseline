@@ -3,6 +3,12 @@ version: "3.8"
 services:
   otelcol:
     image: otel/opentelemetry-collector:0.162.0
+    # The image runs as uid 10001. Its file exporter writes into a bind-mounted
+    # host directory, and on Linux the mount preserves real uids, so the
+    # collector cannot create the file the whole suite reads. macOS hides this
+    # by mapping all mount access to the host user. Run as root: this is a
+    # throwaway test collector, and the alternative is matching host uids.
+    user: "0:0"
     command: ["--config=/etc/otelcol.yaml"]
     volumes:
       - ./otelcol.yaml:/etc/otelcol.yaml:ro

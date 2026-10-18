@@ -34,12 +34,16 @@ pass() { echo "PASS: $1"; }
 # an unwritable output directory alike -- three very different problems.
 fail() {
   echo "FAIL: $1"
+  # Diagnostics must never abort: set -e would otherwise kill this function at
+  # the first command that reports non-zero, which is exactly what happens when
+  # a container is already dead -- hiding the logs that explain why.
+  set +e
   echo "--- diagnostics ---"
-  echo "output dir:"; ls -la "$E2E_DIR/out" 2>&1 | head -5
-  echo "id in collector container:"; $COMPOSE exec -T otelcol id 2>&1 | head -2
-  echo "telemetry.json: $( [ -f "$OUT" ] && wc -c <"$OUT" || echo MISSING ) bytes"
-  echo "collector logs (tail):"; $COMPOSE logs --tail=25 otelcol 2>&1 | tail -25
-  echo "agent logs (tail):"; $COMPOSE logs --tail=25 agent 2>&1 | tail -25
+  echo "output dir:";        ls -la "$E2E_DIR/out" 2>&1 | head -5
+  echo "containers:";        $COMPOSE ps -a 2>&1 | tail -5
+  echo "telemetry.json:";    [ -f "$OUT" ] && wc -c <"$OUT" || echo "MISSING"
+  echo "collector logs:";    $COMPOSE logs --no-color --tail=30 otelcol 2>&1 | tail -30
+  echo "agent logs:";        $COMPOSE logs --no-color --tail=20 agent 2>&1 | tail -20
   echo "--- end diagnostics ---"
   exit 1
 }
