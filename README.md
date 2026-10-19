@@ -49,3 +49,7 @@ deviations.
 
 Local E2E over Docker: `make e2e`, `make e2e-ansible`, `make e2e-systemd`,
 `make e2e-live` (tear down with `make e2e-live-down`).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
