@@ -24,17 +24,18 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
+          fetch-tags: true
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.27"
 
@@ -46,12 +47,31 @@ jobs:
           done
           ls -l baseline-agent-linux-*
 
+      # An annotated tag's body is the written changelog for the release, and
+      # --generate-notes discards it: it only ever lists commit subjects. Read
+      # the body back instead, and fall back to generated notes for a
+      # lightweight tag, which has no body to read.
+      - name: Compose the release notes from the tag annotation
+        run: |
+          git for-each-ref "refs/tags/$TAG" --format='%(contents:body)' > notes.md
+          if [ -s notes.md ]; then
+            prev=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+            if [ -n "$prev" ]; then
+              printf '\n**Full Changelog**: %s/%s/compare/%s...%s\n' \
+                "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$prev" "$TAG" >> notes.md
+            fi
+            echo "NOTES_ARG=--notes-file=notes.md" >> "$GITHUB_ENV"
+          else
+            echo "NOTES_ARG=--generate-notes" >> "$GITHUB_ENV"
+          fi
+          cat notes.md
+
       - name: Ensure the release exists
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "release $TAG already exists"
           else
-            gh release create "$TAG" --title "$TAG" --generate-notes
+            gh release create "$TAG" --title "$TAG" $NOTES_ARG
           fi
 
       - name: Upload the binaries
