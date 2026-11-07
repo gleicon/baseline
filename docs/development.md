@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-Go 1.26+, Ansible (`brew install ansible`), Docker. Lima/Colima/Multipass for
+Go 1.27+, Ansible (`brew install ansible`), Docker. Lima/Colima/Multipass for
 the VM dev loop (`brew install lima`); on Linux no VM is needed.
 
 ## Flags

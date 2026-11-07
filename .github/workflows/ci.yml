@@ -13,7 +13,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.27"
 
       - name: Build
         run: go build ./...
@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.27"
       - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
         env:
           CGO_ENABLED: "0"
@@ -63,7 +63,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.27"
 
       - name: Install Ansible (open-source/free)
         run: |
